@@ -28,7 +28,7 @@ npm run dev
 - Supports optional collider loading through `meshUrl` (`GLTFLoader`) for locomotion hit testing.
 - Includes timeout-based loading and explicit error propagation.
 - API surface:
-  - Component props: `splatUrl`, `meshUrl`, `autoLoad`, `animate`
+  - Component props: `splatUrl`, `meshUrl`, `autoLoad`, `animate`, `enableLod`, `lodSplatScale`
   - System methods: `load(entity, { animate? })`, `unload(entity, { animate? })`, `replayAnimation(entity, { duration? })`
 - Typical usage: add `GaussianSplatLoader` to an entity, set URLs, then let `autoLoad` handle startup or call system methods for runtime swaps.
 
@@ -52,10 +52,26 @@ npm run dev
 ### SparkJS
 - Open-source Gaussian splat renderer from the World Labs team: https://sparkjs.dev/
 - Provides performant Gaussian splat rendering for WebGL2/WebXR in Three.js-based scenes.
+- This project uses **SparkJS 2.0 preview** with Level-of-Detail (LoD) enabled.
 
-***Performance Tips***
-- Large splats can be heavy on standalone devices (Quest/PICO); prefer lower-density assets and progressive detail strategies.
-- Spark has ongoing quick-LoD/prefetch work in the upstream repo (including portal prefetch changes), but verify current npm release support before relying on it in production.
+***Level of Detail (LoD)***
+- LoD automatically adjusts splat quality based on distance: nearby areas render at full detail while distant areas use fewer, coarser splats.
+- This keeps frame rate stable on resource-constrained devices (Quest, PICO) by maintaining a fixed rendering budget instead of always rendering every splat.
+- LoD is enabled by default on the `GaussianSplatLoader` component (`enableLod: true`). Adjust `lodSplatScale` to trade quality for performance (lower = faster, higher = sharper).
+- **Runtime LoD (default):** Point `splatUrl` at any `.spz` file. The LoD tree is computed in-browser on load (~4s for 500K splats). No extra tooling needed.
+- **Pre-built LoD (faster startup):** Bake the LoD tree offline so the browser skips the computation. Clone the [SparkJS repo](https://github.com/sparkjsdev/spark/tree/v2.0.0-preview), build the Rust CLI, and run:
+
+```bash
+cargo build --manifest-path rust/build-lod/Cargo.toml --release
+./rust/target/release/build-lod --spz your-splat.spz
+# produces your-splat-lod.spz
+```
+
+***Three.js Version & Compatibility***
+- This project uses `super-three@0.181.0` (Three.js r181), upgraded from r177 to support SparkJS 2.0.
+- IWSDK externalizes its Three.js dependency, so it automatically uses the project's version. A custom Vite plugin (`deduplicateThree` in `vite.config.ts`) redirects IWSDK's bundled r177 imports to the project's single r181 instance, preventing duplicate Three.js modules.
+- A camera clone patch in `gaussianSplatLoader.ts` prevents a per-frame crash caused by SparkJS's LoD system deep-cloning IWSDK's non-clonable UI objects.
+- **These workarounds are temporary.** IWSDK has already [migrated to r181 on GitHub](https://github.com/facebook/immersive-web-sdk/commit/7317fdb) (Dec 2025) but has not published a new npm release since v0.2.2 (Nov 2025). Once the next IWSDK version ships, the Vite dedup plugin can be removed. The camera clone patch remains needed until SparkJS changes its `driveLod` behavior.
 
 
 ## IWSDK 

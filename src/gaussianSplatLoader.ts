@@ -1,5 +1,5 @@
 import { Types, createComponent, createSystem, Entity } from "@iwsdk/core";
-import { SplatMesh } from "@sparkjsdev/spark";
+import { NewSparkRenderer, SplatMesh } from "@sparkjsdev/spark";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GaussianSplatAnimator } from "./gaussianSplatAnimator.js";
@@ -22,6 +22,8 @@ export const GaussianSplatLoader = createComponent("GaussianSplatLoader", {
   meshUrl: { type: Types.String, default: "" },
   autoLoad: { type: Types.Boolean, default: true },
   animate: { type: Types.Boolean, default: false },
+  enableLod: { type: Types.Boolean, default: true },
+  lodSplatScale: { type: Types.Float32, default: 1.0 },
 });
 
 /**
@@ -35,8 +37,35 @@ export class GaussianSplatLoaderSystem extends createSystem({
   private instances = new Map<number, SplatInstance>();
   private animating = new Set<number>();
   private gltfLoader = new GLTFLoader();
+  private sparkRenderer: NewSparkRenderer | null = null;
 
   init() {
+    const spark = new NewSparkRenderer({
+      renderer: this.world.renderer,
+      enableLod: true,
+      lodSplatScale: 1.0,
+      behindFoveate: 0.1,
+      outsideFoveate: 0.3,
+    });
+    spark.renderOrder = -10;
+    this.world.scene.add(spark);
+    this.sparkRenderer = spark;
+
+    // SparkJS driveLod() deep-clones the camera every frame. IWSDK's
+    // camera has UIKitDocument children that crash during any copy/clone
+    // chain (even non-recursive), so we bypass it entirely and construct
+    // a plain PerspectiveCamera with only the transform/projection data
+    // SparkJS needs for LoD distance calculations.
+    const cam = this.world.camera as THREE.PerspectiveCamera;
+    cam.clone = function () {
+      const c = new THREE.PerspectiveCamera();
+      c.projectionMatrix.copy(this.projectionMatrix);
+      c.projectionMatrixInverse.copy(this.projectionMatrixInverse);
+      c.matrixWorld.copy(this.matrixWorld);
+      c.matrixWorldInverse.copy(this.matrixWorldInverse);
+      return c;
+    };
+
     this.queries.splats.subscribe("qualify", (entity) => {
       const autoLoad = entity.getValue(
         GaussianSplatLoader,
@@ -97,7 +126,23 @@ export class GaussianSplatLoaderSystem extends createSystem({
       await this.unload(entity, { animate: false });
     }
 
-    const splat = new SplatMesh({ url: splatUrl });
+    const enableLod = entity.getValue(
+      GaussianSplatLoader,
+      "enableLod",
+    ) as boolean;
+    const lodSplatScale = entity.getValue(
+      GaussianSplatLoader,
+      "lodSplatScale",
+    ) as number;
+
+    if (this.sparkRenderer && lodSplatScale !== 1.0) {
+      this.sparkRenderer.lodSplatScale = lodSplatScale;
+    }
+
+    const splat = new SplatMesh({
+      url: splatUrl,
+      lod: enableLod || undefined,
+    });
     const timeout = new Promise<never>((_, reject) => {
       setTimeout(
         () =>
