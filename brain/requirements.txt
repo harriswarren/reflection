@@ -1,0 +1,2 @@
+# Brain service (inference + optional World Labs client)
+requests>=2.28.0

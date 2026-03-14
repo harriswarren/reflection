@@ -1,0 +1,124 @@
+# World Labs (Marble) API — Setup & Interface
+
+How to get an API key and call the Marble world model from this project. Reference: [World Labs API Quickstart](https://docs.worldlabs.ai/api).
+
+---
+
+## 1. Get an API key
+
+1. Go to **[platform.worldlabs.ai](https://platform.worldlabs.ai)** and sign in (use your Marble account).
+2. **Billing:** Add a payment method and purchase credits on the [billing page](https://platform.worldlabs.ai/billing).
+3. **API key:** Open the [API keys page](https://platform.worldlabs.ai/api-keys), create a key, and copy it. Store it somewhere safe (e.g. password manager); you won’t see it again.
+
+---
+
+## 2. Where to use the key
+
+| Where you call the API | Where to put the key | Notes |
+|------------------------|----------------------|--------|
+| **WebXR app (browser)** | `.env`: `VITE_WORLDLABS_API_KEY=wl_...` | Key is in the client; only use for dev or if you accept that. |
+| **Brain (Python backend)** | Env var or `.env`: `WORLDLABS_API_KEY=wl_...` | **Recommended.** Key stays server-side; backend calls World Labs and returns `splatUrl` / `meshUrl` to the frontend. |
+
+---
+
+## 3. Interface from the WebXR app (TypeScript)
+
+If the key is in the frontend (e.g. for quick testing):
+
+1. **Add the key to `.env`** (create from `.env.example` if needed):
+   ```env
+   VITE_WORLDLABS_API_KEY=wl_your_actual_key_here
+   ```
+2. **Restart the dev server** so Vite picks up the new env (`npm run dev`).
+3. **Use the existing client** in `src/marbleClient.ts`:
+
+```ts
+import { generateMarbleWorldAndGetAssets } from "./marbleClient.js";
+
+// Full flow: generate world, poll until done, get URLs for the loader
+const assets = await generateMarbleWorldAndGetAssets({
+  displayName: "Inner World Hub",
+  textPrompt: "A minimal floating island hub with two bridges and a distant island in mist, moody lighting",
+  model: "Marble 0.1-mini",  // optional: faster draft (~30–45 s); omit for best quality (~5 min)
+});
+
+console.log(assets.splatUrl, assets.meshUrl, assets.worldId);
+// Set these on GaussianSplatLoader: splatUrl = assets.splatUrl, meshUrl = assets.meshUrl
+```
+
+**API surface (from `marbleClient.ts`):**
+
+| Function | Purpose |
+|----------|---------|
+| `createMarbleWorld({ displayName, textPrompt, model? })` | `POST /marble/v1/worlds:generate` → returns `operation_id`. |
+| `pollMarbleOperation(operationId, options?)` | `GET /marble/v1/operations/{id}` until done → returns world snapshot with `assets.splats.spz_urls` and `assets.mesh.collider_mesh_url`. |
+| `getMarbleAssets(snapshot)` | Turns snapshot into `{ splatUrl, meshUrl, worldId }` (prefers 500k for VR). |
+| `generateMarbleWorldAndGetAssets(options)` | Runs create → poll → getMarbleAssets. |
+
+**Request format (World Labs):**
+
+- **Endpoint:** `POST https://api.worldlabs.ai/marble/v1/worlds:generate`
+- **Headers:** `Content-Type: application/json`, `WLT-Api-Key: YOUR_API_KEY`
+- **Body (text prompt):**
+  ```json
+  {
+    "display_name": "My World",
+    "world_prompt": {
+      "type": "text",
+      "text_prompt": "A mystical forest with glowing mushrooms"
+    }
+  }
+  ```
+- **Optional:** `"model": "Marble 0.1-mini"` for faster, cheaper draft.
+
+**Response:** You get `operation_id`. Poll `GET https://api.worldlabs.ai/marble/v1/operations/{operation_id}` with header `WLT-Api-Key` until `done === true`; then `response.assets.splats.spz_urls` (100k, 500k, full_res) and `response.assets.mesh.collider_mesh_url`.
+
+---
+
+## 4. Interface from the Brain backend (Python)
+
+Keeping the API key on the server is safer. Add a small client in the Brain service and expose an endpoint that returns `splatUrl` (and optionally `meshUrl`) so the WebXR app never sees the key.
+
+A minimal Python client is in **`brain/worldlabs_client.py`**. Example usage from your FastAPI app:
+
+```python
+from worldlabs_client import create_world, poll_until_done, get_asset_urls
+
+# Start generation
+op = create_world(
+    display_name="Inner World Hub",
+    text_prompt="A minimal floating island with two bridges and a distant island in mist",
+    model="Marble 0.1-mini",  # optional
+)
+# Poll until done (blocking)
+snapshot = poll_until_done(op["operation_id"])
+splat_url, mesh_url = get_asset_urls(snapshot)
+# Return splat_url, mesh_url to the frontend
+```
+
+Set the env var before running the Brain service:
+
+```bash
+export WORLDLABS_API_KEY=wl_your_actual_key_here
+# or in .env in the brain folder
+```
+
+---
+
+## 5. Quick test (no key in frontend)
+
+From the Brain backend (or a one-off script):
+
+1. Set `WORLDLABS_API_KEY`.
+2. Call `create_world` then `poll_until_done` (or use the TS client with `VITE_WORLDLABS_API_KEY` set and call `generateMarbleWorldAndGetAssets` from the browser console).
+3. Confirm you get back a `splatUrl` (and optionally `meshUrl`).
+
+Then in the WebXR app, set `GaussianSplatLoader` to that `splatUrl` (and `meshUrl`) — either hardcoded for a pre-generated world or from a response from your Brain API.
+
+---
+
+## Links
+
+- [World Labs Platform](https://platform.worldlabs.ai/) — sign in, billing, API keys  
+- [API Quickstart](https://docs.worldlabs.ai/api) — endpoints and examples  
+- [Marble Export (Spark/Web)](https://docs.worldlabs.ai/marble/export/gaussian-splat/spark) — using .spz in SparkJS/WebXR

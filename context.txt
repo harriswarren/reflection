@@ -1,0 +1,182 @@
+INNER WORLD MODEL — COGNITIVE REFLECTION VR
+Project Technical Plan
+PROJECT OVERVIEW
+We are building a VR experience where the environment responds to the user's cognitive and emotional stance during conversation.
+Instead of modeling physics like traditional world models, this system models human reactions during dialogue and turns those reactions into environmental changes in a virtual world.
+The environment becomes a visualization of the user's internal cognitive state.
+Example environmental reactions:
+defensive reaction → space closes / bridge retracts
+reflective thinking → new path opens
+curiosity → distant island lights up
+stress → fog increases
+The goal is to create an immersive feedback loop where the user sees how their mindset shapes the world around them.
+This is inspired by CBT-style reflection and interrogator-style questioning, but implemented as an interactive VR environment.
+CORE INTERACTION LOOP
+The system runs in the following loop:
+AI asks a reflective question
+↓
+User responds with voice
+↓
+Speech-to-text converts speech to text
+↓
+Brain service analyzes response
+↓
+Cognitive states inferred
+↓
+Dominant state drives world changes
+↓
+AI voice reflection + next question
+This interaction loop runs approximately 2–3 times during the experience.
+KEY COGNITIVE STATES
+We track four primary states inferred from the user’s speech.
+reflection
+User examining their own thinking or reaction
+defensiveness
+Protecting ego or resisting alternative views
+curiosity
+Openness toward other perspectives
+stress
+Emotional tension or perceived threat
+Example inference output:
+{
+"reflection": 0.28,
+"defensiveness": 0.81,
+"curiosity": 0.14,
+"stress": 0.57
+}
+The dominant state determines how the environment changes.
+ENVIRONMENT MAPPING
+Mapping between cognitive states and world changes:
+reflection → bridge opens / world expands
+defensiveness → wall rises / bridge retracts
+stress → fog increases / lighting darkens
+curiosity → distant island lights up
+The environment is intentionally minimal.
+world structure:
+floating island hub
+2–3 bridges
+distant islands
+fog + lighting effects
+This keeps the VR logic simple while clearly showing cause and effect.
+AI BRAIN SERVICE
+The cognitive inference engine will run as a Python service.
+Endpoint:
+POST /infer
+Input:
+{
+"response_text": "User spoken response"
+}
+Output:
+{
+"states": {
+"reflection": 0.3,
+"defensiveness": 0.8,
+"curiosity": 0.2,
+"stress": 0.4
+},
+"dominant_state": "defensiveness",
+"voice_reflection": "Your response sounds more protective than exploratory.",
+"next_question": "What feels threatened if your version of events is incomplete?"
+}
+Unity / WebXR integration only needs:
+dominant_state
+voice_reflection
+next_question
+The environment reacts based on dominant_state.
+AI MODEL STRATEGY
+We do not have credits for a hosted LLM.
+Therefore we will use a local open-source instruction model.
+Model requirements:
+good instruction following
+structured JSON output
+low latency
+runs locally on GPU or CPU
+Possible candidates:
+Llama 3 Instruct
+Mistral 7B Instruct
+Phi-3 Mini
+Mixtral (if hardware allows)
+The task is relatively small:
+classify emotional stance
+produce short reflection sentence
+generate next question
+VOICE PIPELINE
+Voice interaction stack:
+User speech
+↓
+Sesame speech-to-text
+↓
+Brain API inference
+↓
+state + reflection output
+↓
+ElevenLabs voice generation
+Voice reflections should be short and immersive.
+Example reflection lines:
+Reflection is opening space.
+Your response sounds more protective than exploratory.
+Curiosity is revealing new ground.
+Tension is shaping the atmosphere.
+Text UI should be minimized to preserve immersion.
+WORLD GENERATION
+World Labs Marble will be used for environment generation.
+Possible flow:
+Marble generates world or splat scene
+↓
+Unity loads the generated environment
+↓
+environment elements controlled by state triggers
+However the environment should remain minimal and reactive.
+The cognitive interaction system is the main feature.
+TEAM RESPONSIBILITIES
+Brain / AI Inference (Paula)
+cognitive state model
+open-source LLM inference
+FastAPI brain service
+emotional state extraction
+adaptive questioning logic
+Unity VR
+environment creation
+bridges / islands / fog / lighting
+state-driven triggers
+WebXR
+browser fallback version
+rapid prototyping of environment mechanics
+Voice
+Sesame speech-to-text
+ElevenLabs voice output
+EXAMPLE INTERACTION
+AI asks:
+Think of a recent disagreement. What happened?
+User responds:
+They were obviously wrong and refused to listen.
+Brain inference:
+defensiveness high
+reflection low
+curiosity low
+Environment reaction:
+bridge retracts
+space narrows
+AI voice response:
+Your response sounds more protective than exploratory.
+Next question:
+What feels threatened if your version of events is incomplete?
+STRETCH FEATURES (OPTIONAL)
+If time allows:
+EEG cognitive load integration
+adaptive world generation
+persistent cognitive maps
+deeper dialogue branching
+These are optional and not required for MVP.
+MVP DEMO FLOW
+User enters VR environment
+AI asks reflective question
+User responds with voice
+World reacts to cognitive state
+AI voice reflection
+AI asks next question
+Repeat interaction 2–3 times.
+PROJECT SUMMARY
+We are building a world model of human reactions instead of physical physics.
+The environment reflects how the user thinks during conversation.
+The system turns internal cognitive dynamics into a navigable space.
