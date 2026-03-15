@@ -53,20 +53,21 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     await initSplatSwitcher(world.scene, world.renderer, world.camera);
 
     // ------------------------------------------------------------
-    // Invisible floor for locomotion
+    // Transparent floor for locomotion — must stay visible so the
+    // locomotor engine can raycast against it for slide/teleport.
+    // Fully transparent material keeps it invisible to the eye.
     // ------------------------------------------------------------
-    const floorGeometry = new PlaneGeometry(100, 100);
+    const floorGeometry = new PlaneGeometry(200, 200);
     floorGeometry.rotateX(-Math.PI / 2);
-    const floor = new Mesh(floorGeometry, new MeshBasicMaterial());
-    floor.visible = false;
+    const floorMat = new MeshBasicMaterial();
+    (floorMat as unknown as THREE.MeshBasicMaterial).transparent = true;
+    (floorMat as unknown as THREE.MeshBasicMaterial).opacity = 0;
+    (floorMat as unknown as THREE.MeshBasicMaterial).side = THREE.DoubleSide;
+    const floor = new Mesh(floorGeometry, floorMat);
+    // Keep visible=true so the locomotor raycaster can hit it
     world
       .createTransformEntity(floor)
       .addComponent(LocomotionEnvironment, { type: EnvironmentType.STATIC });
-
-    const grid = new THREE.GridHelper(100, 100, 0x444444, 0x222222);
-    grid.material.transparent = true;
-    grid.material.opacity = 0.4;
-    world.scene.add(grid);
 
     // ------------------------------------------------------------
     // Panel UI (centered on screen in desktop, positioned in 3D for XR)
