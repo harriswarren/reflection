@@ -53,21 +53,28 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     await initSplatSwitcher(world.scene, world.renderer, world.camera);
 
     // ------------------------------------------------------------
-    // Transparent floor for locomotion — must stay visible so the
-    // locomotor engine can raycast against it for slide/teleport.
-    // Fully transparent material keeps it invisible to the eye.
+    // Locomotion floor — two layers:
+    //  1. IWSDK entity with LocomotionEnvironment (visible=false is fine;
+    //     the locomotor merges geometry at init, independent of visibility).
+    //  2. A native Three.js plane added to the scene as a backup raycast
+    //     target, fully transparent so it's invisible to the user.
     // ------------------------------------------------------------
     const floorGeometry = new PlaneGeometry(200, 200);
     floorGeometry.rotateX(-Math.PI / 2);
-    const floorMat = new MeshBasicMaterial();
-    (floorMat as unknown as THREE.MeshBasicMaterial).transparent = true;
-    (floorMat as unknown as THREE.MeshBasicMaterial).opacity = 0;
-    (floorMat as unknown as THREE.MeshBasicMaterial).side = THREE.DoubleSide;
-    const floor = new Mesh(floorGeometry, floorMat);
-    // Keep visible=true so the locomotor raycaster can hit it
+    const floor = new Mesh(floorGeometry, new MeshBasicMaterial());
+    floor.visible = false;
     world
       .createTransformEntity(floor)
       .addComponent(LocomotionEnvironment, { type: EnvironmentType.STATIC });
+
+    // Native Three.js backup floor for raycast-based locomotion
+    const nativeFloor = new THREE.Mesh(
+      new THREE.PlaneGeometry(200, 200),
+      new THREE.MeshBasicMaterial({ visible: false }),
+    );
+    nativeFloor.rotation.x = -Math.PI / 2;
+    nativeFloor.position.y = 0;
+    world.scene.add(nativeFloor);
 
     // ------------------------------------------------------------
     // Panel UI (centered on screen in desktop, positioned in 3D for XR)
