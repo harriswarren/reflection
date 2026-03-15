@@ -14,8 +14,11 @@ import {
   World,
 } from "@iwsdk/core";
 import { PanelSystem } from "./uiPanel.js";
-import { GaussianSplatLoader, GaussianSplatLoaderSystem,} from "./gaussianSplatLoader.js";
+import { GaussianSplatLoader, GaussianSplatLoaderSystem } from "./gaussianSplatLoader.js";
+import { CognitiveState, CognitiveWorldSystem } from "./cognitiveWorld.js";
+import { setCognitiveState } from "./cognitiveStateStore.js";
 import { spawnHologramSphere } from "./interactableExample.js";
+import { SPLAT_URL } from "./config.js";
 
 
 // ------------------------------------------------------------
@@ -45,16 +48,27 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
 
     world
       .registerSystem(PanelSystem)
-      .registerSystem(GaussianSplatLoaderSystem);
+      .registerSystem(GaussianSplatLoaderSystem)
+      .registerSystem(CognitiveWorldSystem);
 
 
     // ------------------------------------------------------------
-    // Gaussian Splat
+    // Gaussian Splat (Marble world — default: Simple-Island.spz; set VITE_SPLAT_URL in .env to override)
     // ------------------------------------------------------------
     const splatEntity = world.createTransformEntity();
-    splatEntity.addComponent(GaussianSplatLoader);
+    splatEntity.addComponent(GaussianSplatLoader, {
+      splatUrl: SPLAT_URL,
+      meshUrl: "",
+      autoLoad: true,
+      animate: true,
+      enableLod: true,
+    });
 
     const splatSystem = world.getSystem(GaussianSplatLoaderSystem)!;
+
+    // Cognitive state entity: voice → Brain → onStateUpdate(setCognitiveState) → CognitiveWorldSystem drives bridge/fog/island/light
+    const stateEntity = world.createTransformEntity();
+    stateEntity.addComponent(CognitiveState);
 
     // Play splat animation when entering XR
     world.visibilityState.subscribe((state) => {
@@ -109,6 +123,11 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         width: "40%",
       });
     panelEntity.object3D!.position.set(0, 1.29, -1.9);
+
+    // To start the voice → Brain → environment loop, call:
+    //   import { runConversation } from "./conversationManager.js";
+    //   runConversation("Think of a recent disagreement. What happened?", { onStateUpdate: setCognitiveState });
+    // Each Brain response updates the store; CognitiveWorldSystem animates bridge/fog/island/light.
 
   })
   .catch((err) => {

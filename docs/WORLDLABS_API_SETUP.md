@@ -105,7 +105,51 @@ export WORLDLABS_API_KEY=wl_your_actual_key_here
 
 ---
 
-## 5. Quick test (no key in frontend)
+## 5. Quick test — verify connection
+
+### Option A: Python (recommended if you have the Brain env)
+
+1. Install deps: `pip install requests` (or `pip install -r brain/requirements.txt`).
+2. Put your key in `.env` as `VITE_WORLDLABS_API_KEY=wl_...` — the test script also reads that. Or set `WORLDLABS_API_KEY` in the environment.
+3. From the project root run:
+   ```bash
+   python brain/test_worldlabs.py
+   ```
+   The script starts a small world generation (Marble 0.1-mini), polls until done, and prints `splatUrl` / `meshUrl`. If that succeeds, the connection works.
+
+### Option B: curl (any machine)
+
+Replace `wl_YOUR_KEY` with your key. If you get an `operation_id` back, the connection works.
+
+```bash
+curl -s -X POST "https://api.worldlabs.ai/marble/v1/worlds:generate" \
+  -H "Content-Type: application/json" \
+  -H "WLT-Api-Key: wl_YOUR_KEY" \
+  -d "{\"display_name\":\"Test\",\"world_prompt\":{\"type\":\"text\",\"text_prompt\":\"A small room\"},\"model\":\"Marble 0.1-mini\"}"
+```
+
+PowerShell (one line):
+
+```powershell
+$key = "wl_YOUR_KEY"
+$body = '{"display_name":"Test","world_prompt":{"type":"text","text_prompt":"A small room"},"model":"Marble 0.1-mini"}'
+Invoke-RestMethod -Uri "https://api.worldlabs.ai/marble/v1/worlds:generate" -Method Post -Headers @{"Content-Type"="application/json"; "WLT-Api-Key"=$key} -Body $body
+```
+
+Expected: JSON with `operation_id`. Error 401 = bad or missing key.
+
+### Option C: Browser (WebXR app)
+
+1. Add `VITE_WORLDLABS_API_KEY=wl_...` to `.env`, then run `npm run dev`.
+2. Open the app in the browser, open DevTools → Console, and run:
+   ```js
+   import('./src/marbleClient.js').then(m => m.generateMarbleWorldAndGetAssets({
+     displayName: 'Test',
+     textPrompt: 'A small empty room',
+     model: 'Marble 0.1-mini'
+   })).then(a => console.log('OK', a)).catch(e => console.error(e))
+   ```
+   (If the app uses dynamic imports you may need to expose the client on `window` for a quick test.) Alternatively, add a temporary “Test Marble” button in the UI that calls `generateMarbleWorldAndGetAssets` and logs the result.
 
 From the Brain backend (or a one-off script):
 
