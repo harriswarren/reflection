@@ -43,9 +43,6 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     world.scene.background = new THREE.Color(0x000000);
     world.scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 
-    // Camera must be in the scene graph for HUD sprites (children of camera) to render
-    world.scene.add(world.camera);
-
     world.registerSystem(PanelSystem);
 
     // Load all 5 splats (neutral + 4 states). All resident in memory;
@@ -53,11 +50,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     await initSplatSwitcher(world.scene, world.renderer, world.camera);
 
     // ------------------------------------------------------------
-    // Locomotion floor — two layers:
-    //  1. IWSDK entity with LocomotionEnvironment (visible=false is fine;
-    //     the locomotor merges geometry at init, independent of visibility).
-    //  2. A native Three.js plane added to the scene as a backup raycast
-    //     target, fully transparent so it's invisible to the user.
+    // Invisible floor for locomotion
     // ------------------------------------------------------------
     const floorGeometry = new PlaneGeometry(200, 200);
     floorGeometry.rotateX(-Math.PI / 2);
@@ -67,14 +60,10 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       .createTransformEntity(floor)
       .addComponent(LocomotionEnvironment, { type: EnvironmentType.STATIC });
 
-    // Native Three.js backup floor for raycast-based locomotion
-    const nativeFloor = new THREE.Mesh(
-      new THREE.PlaneGeometry(200, 200),
-      new THREE.MeshBasicMaterial({ visible: false }),
-    );
-    nativeFloor.rotation.x = -Math.PI / 2;
-    nativeFloor.position.y = 0;
-    world.scene.add(nativeFloor);
+    const grid = new THREE.GridHelper(100, 100, 0x444444, 0x222222);
+    grid.material.transparent = true;
+    grid.material.opacity = 0.4;
+    world.scene.add(grid);
 
     // ------------------------------------------------------------
     // Panel UI (centered on screen in desktop, positioned in 3D for XR)
@@ -106,8 +95,14 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       });
     }
 
-    // Voice status HUD: pinned to bottom-left of view, shows mic/speaking/processing state
-    const hud = new VoiceStatusHud(world.camera);
+    // Voice status HUD — added to the scene (NOT parented to camera)
+    // and repositioned each frame to follow the user's view.
+    const hud = new VoiceStatusHud(world.camera, world.scene);
+
+    // Update HUD position every frame so it follows the camera
+    world.renderer.setAnimationLoop(() => {
+      hud.update();
+    });
 
     // Voice conversation: wake word "Hello World Model" → listen → Brain → scene change.
     startVoiceConversation({

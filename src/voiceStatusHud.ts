@@ -1,13 +1,12 @@
 /**
- * VoiceStatusHud — a canvas-based sprite pinned to the bottom-left of
- * the user's view (works in both VR and desktop). Shows:
+ * VoiceStatusHud — a canvas-based sprite that follows the camera each frame.
+ * NOT parented to the camera (that breaks IWSDK locomotion). Instead, a
+ * per-frame update copies the camera's world transform and offsets the sprite.
  *
- *   Line 1:  [dot] Status label  (e.g. "Listening...", "Speaking...")
- *   Line 2:  Model: <what the model is saying/asking>   (blue text)
- *   Line 3:  You: <what the mic is hearing>              (green text)
- *   Line 4:  Scene: <detected emotion>                   (yellow text)
- *
- * The sprite is a child of the camera so it follows head movement.
+ *   Line 1:  [dot] Status label
+ *   Line 2:  Model: <what the model is saying/asking>   (blue)
+ *   Line 3:  You: <what the mic is hearing>              (green)
+ *   Line 4:  Scene: <detected emotion>                   (yellow)
  */
 
 import * as THREE from "three";
@@ -41,11 +40,15 @@ const STATE_COLORS: Record<HudState, string> = {
 const CANVAS_W = 640;
 const CANVAS_H = 300;
 
+// Offset from the camera: bottom-left, slightly in front
+const OFFSET = new THREE.Vector3(-0.28, -0.20, -0.7);
+
 export class VoiceStatusHud {
   private sprite: THREE.Sprite;
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private texture: THREE.CanvasTexture;
+  private camera: THREE.Camera;
 
   private currentState: HudState = "startup";
   private modelText = "";
@@ -53,7 +56,9 @@ export class VoiceStatusHud {
   private emotion = "";
   private dirty = true;
 
-  constructor(camera: THREE.Camera) {
+  constructor(camera: THREE.Camera, scene: THREE.Scene) {
+    this.camera = camera;
+
     this.canvas = document.createElement("canvas");
     this.canvas.width = CANVAS_W;
     this.canvas.height = CANVAS_H;
@@ -70,13 +75,22 @@ export class VoiceStatusHud {
     });
 
     this.sprite = new THREE.Sprite(material);
-    // Wider and taller to fit more text
     this.sprite.scale.set(0.6, 0.28, 1);
-    this.sprite.position.set(-0.28, -0.20, -0.7);
     this.sprite.renderOrder = 20_000;
 
-    camera.add(this.sprite);
+    // Add directly to the scene, not to the camera
+    scene.add(this.sprite);
     this.redraw();
+  }
+
+  /**
+   * Call once per frame (e.g. in a render loop or system update)
+   * to keep the sprite pinned to the camera's bottom-left.
+   */
+  update(): void {
+    // Apply camera world rotation to the offset to get world-space position
+    const worldOffset = OFFSET.clone().applyQuaternion(this.camera.quaternion);
+    this.sprite.position.copy(this.camera.position).add(worldOffset);
   }
 
   setState(state: HudState): void {
@@ -91,7 +105,6 @@ export class VoiceStatusHud {
     }
   }
 
-  /** Show the model's spoken text (question or reflection). */
   setModelText(text: string): void {
     const truncated = text.length > 90 ? text.substring(0, 87) + "..." : text;
     if (truncated !== this.modelText) {
@@ -103,7 +116,6 @@ export class VoiceStatusHud {
     }
   }
 
-  /** Show what the mic is hearing (user's speech). */
   setUserText(text: string): void {
     const truncated = text.length > 90 ? text.substring(0, 87) + "..." : text;
     if (truncated !== this.userText) {
@@ -138,7 +150,6 @@ export class VoiceStatusHud {
     roundRect(ctx, 4, 4, w - 8, h - 8, 16);
     ctx.fill();
 
-    // Row 1: Status dot + label
     const dotColor = STATE_COLORS[this.currentState];
     ctx.beginPath();
     ctx.arc(28, 36, 10, 0, Math.PI * 2);
@@ -158,14 +169,12 @@ export class VoiceStatusHud {
     ctx.textBaseline = "middle";
     ctx.fillText(STATE_LABELS[this.currentState], 50, 36);
 
-    // Row 2: Model text (blue)
     if (this.modelText) {
       ctx.fillStyle = "#88bbff";
       ctx.font = "20px sans-serif";
       wrapText(ctx, "Model: " + this.modelText, 18, 80, w - 36, 22);
     }
 
-    // Row 3: User text (green)
     if (this.userText) {
       ctx.fillStyle = "#88ff88";
       ctx.font = "20px sans-serif";
@@ -173,7 +182,6 @@ export class VoiceStatusHud {
       wrapText(ctx, "You: " + this.userText, 18, userY, w - 36, 22);
     }
 
-    // Row 4: Emotion (yellow)
     if (this.emotion) {
       ctx.fillStyle = "#fbbf24";
       ctx.font = "bold 22px sans-serif";
@@ -184,7 +192,6 @@ export class VoiceStatusHud {
   }
 }
 
-/** Draw text with simple word wrapping. */
 function wrapText(
   ctx: CanvasRenderingContext2D,
   text: string, x: number, y: number, maxWidth: number, lineHeight: number,
