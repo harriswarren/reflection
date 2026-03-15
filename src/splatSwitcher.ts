@@ -14,6 +14,7 @@
 import * as THREE from "three";
 import { SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
 import { SPLAT_URL_NEUTRAL, SPLAT_URL_BY_STATE } from "./config.js";
+import { showClouds, hideClouds, initStressClouds } from "./stressClouds.js";
 
 export type SplatStateName = "neutral" | "reflection" | "defensiveness" | "curiosity" | "stress";
 
@@ -86,6 +87,10 @@ export async function initSplatSwitcher(
   });
 
   await Promise.all(loadPromises);
+
+  // Load stress-specific GLTF assets (storm clouds) in parallel
+  await initStressClouds(scene);
+
   ready = true;
   console.log("[SplatSwitcher] All " + splats.size + " splats loaded and ready.");
 }
@@ -102,6 +107,14 @@ export function switchSplatTo(state: SplatStateName): void {
   for (const [key, mesh] of splats) {
     mesh.visible = (key === state);
   }
+
+  // Show storm clouds only during stress state
+  if (state === "stress") {
+    showClouds();
+  } else {
+    hideClouds();
+  }
+
   currentState = state;
   console.log("[SplatSwitcher] Switched to: " + state);
 }
