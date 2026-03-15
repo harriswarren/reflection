@@ -14,6 +14,7 @@ import {
 } from "@iwsdk/core";
 import { PanelSystem } from "./uiPanel.js";
 import { initSplatSwitcher, toggleSplatByState } from "./splatSwitcher.js";
+import { startVoiceConversation } from "./conversationManager.js";
 
 
 // ------------------------------------------------------------
@@ -92,6 +93,17 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         if (state) btn.addEventListener("click", () => toggleSplatByState(state));
       });
     }
+
+    // Voice conversation: wake word "Hello World Model" → listen → Brain → scene change.
+    // Uses Pico 4 mic via Web Speech API. Runs continuously in background.
+    startVoiceConversation({
+      onWakeWordDetected: () => console.log("[World] Wake word detected, starting conversation..."),
+      onListening: () => console.log("[World] Listening for user response..."),
+      onProcessing: () => console.log("[World] Processing speech..."),
+      onSceneChange: (state, score) => console.log("[World] Scene → " + state + " (confidence: " + score.toFixed(2) + ")"),
+      onConversationEnd: () => console.log("[World] Conversation ended, back to wake word listening."),
+      onError: (err) => console.error("[World] Conversation error:", err),
+    });
 
   })
   .catch((err) => {

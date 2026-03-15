@@ -1,83 +1,203 @@
 /**
- * Conversation manager for Inner World Model.
- * Orchestrates the loop:
- *   1. Play initial question (or show it)
- *   2. Start STT (user speaks)
- *   3. On final transcript → POST /infer (Brain)
- *   4. onStateUpdate(result) → app updates CognitiveState entity → world reacts
- *   5. TTS(voice_reflection) then TTS(next_question)
- *   6. Repeat 2–5 for 2–3 turns, then end.
+ * Conversation Manager for Inner World Model.
  *
- * Wire this into your World after world.create(): pass initialQuestion and
- * onStateUpdate (where you update the entity that has CognitiveState).
+ * Flow:
+ *   1. Continuously listen for wake word "Hello World Model"
+ *   2. Once detected → greet user, ask an emotion-probing question
+ *   3. Listen for user's full response (silence timeout = end of turn)
+ *   4. Send transcript to Brain API → get cognitive state scores
+ *   5. If dominant state score >= CONFIDENCE_THRESHOLD → switch splat scene
+ *   6. Speak voice_reflection, then next_question
+ *   7. Repeat 3-6 for several turns, or until user says goodbye
+ *
+ * Uses Pico 4 microphone via Web Speech API (same mic the browser uses).
  */
 
 import { infer, type BrainInferResponse } from "./brainClient.js";
-import { startListening } from "./voiceStt.js";
+import { startListening, type SttCallback } from "./voiceStt.js";
 import { speak } from "./voiceTts.js";
+import { switchSplatTo, type SplatStateName } from "./splatSwitcher.js";
 
-const MAX_TURNS = 3;
+// Minimum score for the dominant state to trigger a scene change.
+// Below this, we stay in the current scene (avoids flicker on ambiguous input).
+const CONFIDENCE_THRESHOLD = 0.55;
+
+const MAX_TURNS = 5;
+
+const WAKE_PHRASE = "hello world model";
+
+// Opening questions designed to surface different emotions.
+// The Brain will generate follow-ups, but these kick off the conversation.
+const OPENING_QUESTIONS = [
+  "Think about a recent disagreement you had with someone. What was it about, and how did you feel during it?",
+  "Tell me about a moment recently where you felt misunderstood. What happened?",
+  "Describe a situation where you felt under pressure to respond quickly. How did you handle it?",
+  "Is there something you've been curious about lately that you haven't had time to explore?",
+  "Think of a time when you changed your mind about something important. What led to that shift?",
+];
 
 export interface ConversationCallbacks {
+  onWakeWordDetected?: () => void;
   onListening?: () => void;
-  onThinking?: () => void;
+  onProcessing?: () => void;
   onSpeaking?: () => void;
+  onSceneChange?: (state: SplatStateName, confidence: number) => void;
   onTurnComplete?: (turn: number) => void;
-  /** Called with Brain response so the app can update CognitiveState entity and drive the world. */
-  onStateUpdate: (result: BrainInferResponse) => void;
+  onConversationEnd?: () => void;
+  onError?: (error: Error) => void;
 }
 
 /**
- * Runs the full conversation flow: listen → Brain → onStateUpdate → TTS.
- * Implement onStateUpdate to set your CognitiveState component from result
- * (dominant_state, states.reflection, etc.) so CognitiveWorldSystem can react.
+ * Start listening for the wake word. Once detected, runs the
+ * conversation loop (question → listen → infer → scene change → repeat).
+ * Returns a cleanup function that stops everything.
  */
-export async function runConversation(
-  initialQuestion: string,
-  callbacks: ConversationCallbacks
-): Promise<void> {
-  await speak(initialQuestion);
+export function startVoiceConversation(callbacks?: ConversationCallbacks): () => void {
+  let stopped = false;
+  let stopCurrentListener: (() => void) | null = null;
+
+  console.log("[Conversation] Listening for wake word: \"Hello World Model\"");
+
+  // Phase 1: listen for wake word
+  stopCurrentListener = startListening((result) => {
+    if (stopped) return;
+    const text = result.transcript.toLowerCase();
+
+    if (text.includes(WAKE_PHRASE)) {
+      console.log("[Conversation] Wake word detected!");
+      callbacks?.onWakeWordDetected?.();
+      stopCurrentListener?.();
+      stopCurrentListener = null;
+      runConversationLoop(callbacks).catch((err) => {
+        console.error("[Conversation] Loop error:", err);
+        callbacks?.onError?.(err instanceof Error ? err : new Error(String(err)));
+      }).finally(() => {
+        if (!stopped) {
+          // Restart wake word listening after conversation ends
+          console.log("[Conversation] Returning to wake word listening.");
+          callbacks?.onConversationEnd?.();
+          const cleanup = startVoiceConversation(callbacks);
+          stopCurrentListener = cleanup as unknown as () => void;
+        }
+      });
+    }
+  });
+
+  return () => {
+    stopped = true;
+    stopCurrentListener?.();
+    stopCurrentListener = null;
+  };
+}
+
+async function runConversationLoop(callbacks?: ConversationCallbacks): Promise<void> {
+  // Pick a random opening question
+  const openingQ = OPENING_QUESTIONS[Math.floor(Math.random() * OPENING_QUESTIONS.length)];
+
+  callbacks?.onSpeaking?.();
+  await speak("Hello. I'm your world model. Let's explore something together.");
+  await speak(openingQ);
+
+  let previousQuestion = openingQ;
   let turn = 0;
 
   while (turn < MAX_TURNS) {
-    callbacks.onListening?.();
-    const transcript = await listenForFinalTranscript();
+    // Listen for user's response
+    callbacks?.onListening?.();
+    const transcript = await listenForResponse();
+
     if (!transcript.trim()) {
-      continue;
+      console.log("[Conversation] Empty response, ending conversation.");
+      break;
     }
 
-    callbacks.onThinking?.();
+    // Check for goodbye
+    const lower = transcript.toLowerCase();
+    if (lower.includes("goodbye") || lower.includes("bye") || lower.includes("end session")) {
+      await speak("Thank you for sharing. Take care.");
+      break;
+    }
+
+    // Send to Brain for cognitive analysis
+    callbacks?.onProcessing?.();
+    console.log("[Conversation] Processing: \"" + transcript.substring(0, 80) + "...\"");
+
     let result: BrainInferResponse;
     try {
       result = await infer(transcript);
     } catch (e) {
-      console.error("[ConversationManager] Brain API error:", e);
-      break;
+      console.error("[Conversation] Brain API error:", e);
+      callbacks?.onError?.(e instanceof Error ? e : new Error(String(e)));
+      await speak("I had trouble processing that. Could you try again?");
+      continue;
     }
 
-    callbacks.onStateUpdate(result);
+    console.log("[Conversation] Brain result: " + result.dominant_state +
+      " (reflection=" + result.states.reflection.toFixed(2) +
+      " defensiveness=" + result.states.defensiveness.toFixed(2) +
+      " curiosity=" + result.states.curiosity.toFixed(2) +
+      " stress=" + result.states.stress.toFixed(2) + ")");
 
-    callbacks.onSpeaking?.();
-    await speak(result.voice_reflection);
-    await speak(result.next_question);
+    // Switch scene if confidence is above threshold
+    const dominantScore = result.states[result.dominant_state as keyof typeof result.states];
+    if (dominantScore >= CONFIDENCE_THRESHOLD) {
+      const newState = result.dominant_state as SplatStateName;
+      console.log("[Conversation] Scene change → " + newState + " (score=" + dominantScore.toFixed(2) + ")");
+      switchSplatTo(newState);
+      callbacks?.onSceneChange?.(newState, dominantScore);
+    } else {
+      console.log("[Conversation] Score " + dominantScore.toFixed(2) +
+        " below threshold " + CONFIDENCE_THRESHOLD + ", keeping current scene.");
+    }
+
+    // Speak reflection and follow-up question
+    callbacks?.onSpeaking?.();
+    if (result.voice_reflection) {
+      await speak(result.voice_reflection);
+    }
+    if (result.next_question) {
+      await speak(result.next_question);
+      previousQuestion = result.next_question;
+    }
 
     turn++;
-    callbacks.onTurnComplete?.(turn);
+    callbacks?.onTurnComplete?.(turn);
   }
+
+  // Return to neutral scene when conversation ends
+  switchSplatTo("neutral");
+  callbacks?.onConversationEnd?.();
 }
 
-/** Returns a Promise that resolves with the final transcript when the user stops speaking (isFinal). */
-function listenForFinalTranscript(): Promise<string> {
+/**
+ * Listen until the user finishes speaking (final transcript from Web Speech API).
+ * A 10-second silence timeout ends the turn.
+ */
+function listenForResponse(): Promise<string> {
   return new Promise((resolve) => {
     let finalTranscript = "";
+    let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+    const SILENCE_TIMEOUT_MS = 10_000;
+
     const stop = startListening((result) => {
+      // Reset silence timer on any speech
+      if (silenceTimer) clearTimeout(silenceTimer);
+
       if (result.isFinal && result.transcript.trim()) {
         finalTranscript = result.transcript.trim();
         stop();
         resolve(finalTranscript);
+        return;
       }
+
+      // If we're getting interim results, restart the silence timer
+      silenceTimer = setTimeout(() => {
+        stop();
+        resolve(finalTranscript);
+      }, SILENCE_TIMEOUT_MS);
     });
-    // Optional: timeout after 30s and resolve with whatever we have
+
+    // Overall timeout: 30s max per turn
     setTimeout(() => {
       stop();
       resolve(finalTranscript);
