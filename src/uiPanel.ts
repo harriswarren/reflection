@@ -9,11 +9,27 @@ import {
   UIKit,
 } from "@iwsdk/core";
 import * as THREE from "three";
+import {
+  toggleSplatByState,
+  getCurrentSplatState,
+  type SplatStateName,
+} from "./splatSwitcher.js";
+
+const STATE_BUTTONS: SplatStateName[] = ["reflection", "defensiveness", "curiosity", "stress"];
+
+function updateStateButtonLabels(doc: UIKitDocument): void {
+  const current = getCurrentSplatState();
+  for (const state of STATE_BUTTONS) {
+    const btn = doc.getElementById("state-" + state) as UIKit.Text | undefined;
+    if (btn?.setProperties) {
+      const label = state.charAt(0).toUpperCase() + state.slice(1);
+      const isOn = current === state;
+      btn.setProperties({ text: label + " " + (isOn ? "(ON)" : "(OFF)") });
+    }
+  }
+}
 
 // Render UI on top of splats using AlwaysDepth + high renderOrder.
-// depthWrite stays true so the IWSDK laser pointer depth-tests correctly
-// against the panel surface (depthTest=false would break it).
-
 const UI_RENDER_ORDER = 10_000;
 const APPLIED_FLAG = "__uiDepthConfigApplied";
 
@@ -23,7 +39,6 @@ function configureUIMaterial(material: THREE.Material | null | undefined) {
   material.depthWrite = true;
   material.depthFunc = THREE.AlwaysDepth;
 
-  // Use texture alpha for images (e.g. logo) so transparent pixels don’t show black
   if (material instanceof THREE.MeshBasicMaterial && material.map) {
     material.transparent = true;
     material.alphaTest = 0.01;
@@ -44,7 +59,6 @@ function applyRenderOrderToObject(object3D: THREE.Object3D) {
         configureUIMaterial(obj.material);
       }
 
-      // Re-apply every render in case IWSDK replaces materials
       const originalOnBeforeRender = obj.onBeforeRender;
       obj.onBeforeRender = function (
         renderer,
@@ -71,11 +85,6 @@ function applyRenderOrderToObject(object3D: THREE.Object3D) {
   });
 }
 
-/**
- * Force an entity's UI meshes to render on top of Gaussian Splats.
- * Retries for up to 10 frames since IWSDK may not have built the
- * panel meshes yet at qualify time.
- */
 export function makeEntityRenderOnTop(entity: Entity): void {
   let attempts = 0;
 
@@ -88,7 +97,7 @@ export function makeEntityRenderOnTop(entity: Entity): void {
       requestAnimationFrame(tryApply);
     } else {
       console.warn(
-        `[Panel] makeEntityRenderOnTop: entity ${entity.index} had no object3D after 10 frames.`,
+        "[Panel] makeEntityRenderOnTop: entity " + entity.index + " had no object3D after 10 frames.",
       );
     }
   };
@@ -103,17 +112,16 @@ export class PanelSystem extends createSystem({
   },
 }) {
   init() {
-    // replayExisting: true so we run setup for entities that already qualified
-    // (e.g. when PanelDocument loads before or in the same tick as init).
     this.queries.sensaiPanel.subscribe("qualify", (entity) => {
       makeEntityRenderOnTop(entity);
 
-      const document = PanelDocument.data.document[
+      const panelDoc = PanelDocument.data.document[
         entity.index
       ] as UIKitDocument;
-      if (!document) return;
+      if (!panelDoc) return;
 
-      const xrButton = document.getElementById("xr-button") as UIKit.Text;
+      // XR enter/exit button
+      const xrButton = panelDoc.getElementById("xr-button") as UIKit.Text;
       xrButton.addEventListener("click", () => {
         if (this.world.visibilityState.value === VisibilityState.NonImmersive) {
           this.world.launchXR();
@@ -130,6 +138,21 @@ export class PanelSystem extends createSystem({
               : "Exit to Browser",
         });
       });
+
+      // Splat state buttons — directly toggle via splatSwitcher (instant)
+      for (const state of STATE_BUTTONS) {
+        const btn = panelDoc.getElementById("state-" + state);
+        if (btn) {
+          btn.addEventListener("click", () => {
+            console.log("[Panel] Button clicked: " + state);
+            toggleSplatByState(state);
+            updateStateButtonLabels(panelDoc);
+          });
+        } else {
+          console.warn("[Panel] Button not found: state-" + state);
+        }
+      }
+      updateStateButtonLabels(panelDoc);
     }, true);
   }
 }

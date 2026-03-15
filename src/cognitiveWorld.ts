@@ -13,8 +13,9 @@
 import * as THREE from "three";
 import { Types, createComponent, createSystem } from "@iwsdk/core";
 import { getCognitiveState } from "./cognitiveStateStore.js";
+import { getSplatState } from "./environmentStore.js";
 import { GaussianSplatLoader, GaussianSplatLoaderSystem } from "./gaussianSplatLoader.js";
-import { SPLAT_URL_BY_STATE } from "./config.js";
+import { SPLAT_URL_NEUTRAL, SPLAT_URL_BY_STATE } from "./config.js";
 
 const LERP = 0.03; // Smooth transition per frame
 const FOG_MAX = 0.08;
@@ -30,12 +31,10 @@ export const CognitiveState = createComponent("CognitiveState", {
   stress: { type: Types.Float32, default: 0 },
 });
 
-/** Scene objects we drive from cognitive state. */
+/** Scene objects we drive from cognitive state (island removed per design). */
 interface CognitiveScene {
   bridge: THREE.Mesh;
   wall: THREE.Mesh;
-  island: THREE.Mesh;
-  islandLight: THREE.PointLight;
   ambientLight: THREE.AmbientLight;
   fog: THREE.FogExp2;
 }
@@ -48,11 +47,10 @@ export class CognitiveWorldSystem extends createSystem({
   private scene: CognitiveScene | null = null;
   private bridgeTargetScale = 1;
   private wallTargetY = 0;
-  private islandEmissiveTarget = 0;
   private fogDensityTarget = FOG_MIN;
   private lightIntensityTarget = 1;
-  /** Track dominant state so we only switch splat when it changes. */
-  private lastDominantState: DominantState | null = null;
+  /** Track splat state so we only switch environment when it changes (controller or UI). */
+  private lastSplatState: string | null = null;
 
   init(): void {
     const scene = this.world.scene;
@@ -77,21 +75,6 @@ export class CognitiveWorldSystem extends createSystem({
     wall.rotation.y = Math.PI;
     scene.add(wall);
 
-    // Distant island: sphere that "lights up" (curiosity)
-    const islandGeom = new THREE.SphereGeometry(2, 16, 16);
-    const islandMat = new THREE.MeshStandardMaterial({
-      color: 0x2d5a27,
-      emissive: 0x224422,
-      emissiveIntensity: 0,
-    });
-    const island = new THREE.Mesh(islandGeom, islandMat);
-    island.position.set(8, 1, -15);
-    scene.add(island);
-
-    const islandLight = new THREE.PointLight(0x88ff88, 0, 20);
-    islandLight.position.copy(island.position);
-    scene.add(islandLight);
-
     // Fog (stress)
     const fog = new THREE.FogExp2(0x223344, FOG_MIN);
     scene.fog = fog;
@@ -103,8 +86,6 @@ export class CognitiveWorldSystem extends createSystem({
     this.scene = {
       bridge,
       wall,
-      island,
-      islandLight,
       ambientLight,
       fog,
     };
@@ -113,16 +94,14 @@ export class CognitiveWorldSystem extends createSystem({
   execute(): void {
     if (!this.scene) return;
 
-    const state = getCognitiveState();
-    const { dominantState, reflection, defensiveness, curiosity, stress } = state;
-
-    // When dominant state changes, switch environment splat to the state-specific Venice-*.spz
-    // Skip load on first frame (lastDominantState === null) to avoid reloading the initial splat.
-    if (dominantState !== this.lastDominantState) {
-      const previous = this.lastDominantState;
-      this.lastDominantState = dominantState;
+    // Splat switching is driven by environment store (controller A/B/X/Y or UI buttons)
+    const splatState = getSplatState();
+    if (splatState !== this.lastSplatState) {
+      const previous = this.lastSplatState;
+      this.lastSplatState = splatState;
+      // First frame: only sync state; initial splat already loaded (Venice.spz) in index.ts
       if (previous !== null) {
-        const splatUrl = SPLAT_URL_BY_STATE[dominantState];
+        const splatUrl = splatState === "neutral" ? SPLAT_URL_NEUTRAL : SPLAT_URL_BY_STATE[splatState];
         if (splatUrl && this.queries.splats.entities.length > 0) {
           const splatEntity = this.queries.splats.entities[0];
           const loaderSystem = this.world.getSystem(GaussianSplatLoaderSystem);
@@ -135,33 +114,32 @@ export class CognitiveWorldSystem extends createSystem({
       }
     }
 
+    const state = getCognitiveState();
+    const { dominantState, reflection, defensiveness, curiosity, stress } = state;
+
     // Map dominant state + scores to targets (see STATE_ENVIRONMENT_MAPPING.md)
     switch (dominantState) {
       case "reflection":
         this.bridgeTargetScale = 0.3 + 0.7 * reflection;
         this.wallTargetY = -4;
-        this.islandEmissiveTarget = 0;
         this.fogDensityTarget = FOG_MIN;
         this.lightIntensityTarget = 0.7 + 0.3 * reflection;
         break;
       case "defensiveness":
         this.bridgeTargetScale = Math.max(0.15, 0.5 - 0.35 * defensiveness);
         this.wallTargetY = -4 + 5 * defensiveness;
-        this.islandEmissiveTarget = 0;
         this.fogDensityTarget = FOG_MIN + 0.02 * defensiveness;
         this.lightIntensityTarget = 1 - 0.3 * defensiveness;
         break;
       case "curiosity":
         this.bridgeTargetScale = 0.5;
         this.wallTargetY = -4;
-        this.islandEmissiveTarget = 0.3 + 0.6 * curiosity;
         this.fogDensityTarget = FOG_MIN;
         this.lightIntensityTarget = 1;
         break;
       case "stress":
         this.bridgeTargetScale = 0.4;
         this.wallTargetY = -4;
-        this.islandEmissiveTarget = 0;
         this.fogDensityTarget = FOG_MIN + (FOG_MAX - FOG_MIN) * stress;
         this.lightIntensityTarget = Math.max(0.4, 1 - 0.6 * stress);
         break;
@@ -169,17 +147,10 @@ export class CognitiveWorldSystem extends createSystem({
         break;
     }
 
-    const { bridge, wall, island, islandLight, ambientLight, fog } = this.scene;
+    const { bridge, wall, ambientLight, fog } = this.scene;
 
-    // Lerp current values toward targets
     bridge.scale.z += (this.bridgeTargetScale - bridge.scale.z) * LERP;
     wall.position.y += (this.wallTargetY - wall.position.y) * LERP;
-
-    const islandMat = island.material as THREE.MeshStandardMaterial;
-    const currentEmissive = islandMat.emissiveIntensity ?? 0;
-    islandMat.emissiveIntensity = currentEmissive + (this.islandEmissiveTarget - currentEmissive) * LERP;
-    islandLight.intensity = islandMat.emissiveIntensity * 2;
-
     fog.density += (this.fogDensityTarget - fog.density) * LERP;
     ambientLight.intensity += (this.lightIntensityTarget - ambientLight.intensity) * LERP;
   }

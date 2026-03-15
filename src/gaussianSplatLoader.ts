@@ -1,10 +1,9 @@
-
 import { Types, createComponent, createSystem, Entity } from "@iwsdk/core";
 import { SparkRenderer, SplatMesh } from "@sparkjsdev/spark";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { GaussianSplatAnimator } from "./gaussianSplatAnimator.js";
-
+import { SPLAT_URL_NEUTRAL, SPLAT_URL_BY_STATE } from "./config.js";
 
 // ------------------------------------------------------------
 // Constants & Types
@@ -51,7 +50,12 @@ export class GaussianSplatLoaderSystem extends createSystem({
   // ----------------------------------------------------------
   // State
   // ----------------------------------------------------------
+  /** Active splat per entity (one shown at a time). */
   private instances = new Map<number, SplatInstance>();
+  /** URL of the splat currently shown per entity (for cache key). */
+  private entityCurrentUrl = new Map<number, string>();
+  /** Preloaded splats by URL — instant switch when user changes state. */
+  private cache = new Map<string, SplatInstance>();
   private animating = new Set<number>();
   private gltfLoader = new GLTFLoader();
   private sparkRenderer: SparkRenderer | null = null;
@@ -96,11 +100,53 @@ export class GaussianSplatLoaderSystem extends createSystem({
 
       this.load(entity).catch((err) => {
         console.error(
-          `[GaussianSplatLoader] Auto-load failed for entity ${entity.index}:`,
+          "[GaussianSplatLoader] Auto-load failed for entity " + entity.index + ":",
           err,
         );
       });
     });
+
+    // Preload all state splats in background so button press can switch instantly
+    this.preloadAllStateSplats().catch((err) =>
+      console.warn("[GaussianSplatLoader] Preload failed:", err),
+    );
+  }
+
+  /** Preload every state splat URL so switch is instant. */
+  private async preloadAllStateSplats(): Promise<void> {
+    const urls = new Set<string>();
+    urls.add(SPLAT_URL_NEUTRAL);
+    for (const url of Object.values(SPLAT_URL_BY_STATE)) urls.add(url);
+    for (const url of urls) {
+      if (this.cache.has(url)) continue;
+      try {
+        await this.preload(url);
+      } catch (e) {
+        console.warn("[GaussianSplatLoader] Preload failed for " + url, e);
+      }
+    }
+    console.log("[GaussianSplatLoader] Preload complete; " + this.cache.size + " splats cached.");
+  }
+
+  /**
+   * Load a splat by URL into the cache (not attached to any entity).
+   * Enables instant switch when this URL is selected later.
+   */
+  private async preload(splatUrl: string): Promise<void> {
+    if (this.cache.has(splatUrl)) return;
+    const splat = new SplatMesh({ url: splatUrl, lod: true });
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("Preload timed out: " + splatUrl)),
+        LOAD_TIMEOUT_MS,
+      ),
+    );
+    await Promise.race([splat.initialized, timeout]);
+    const animator = new GaussianSplatAnimator(splat);
+    animator.apply();
+    animator.setProgress(1);
+    splat.renderOrder = -10;
+    this.cache.set(splatUrl, { splat, collider: null, animator });
   }
 
 
@@ -125,13 +171,12 @@ export class GaussianSplatLoaderSystem extends createSystem({
 
 
   // ----------------------------------------------------------
-  // Load – fetch the .spz splat (and optional collider mesh)
+  // Load – show splat (from cache if preloaded, else load then cache)
   // ----------------------------------------------------------
   async load(
     entity: Entity,
     options?: { animate?: boolean; splatUrl?: string },
   ): Promise<void> {
-    // Optional override for state-driven splat switching (e.g. cognitive state → Venice-*.spz)
     const splatUrl = (options?.splatUrl != null && options.splatUrl !== "")
       ? options.splatUrl
       : (entity.getValue(GaussianSplatLoader, "splatUrl") as string);
@@ -142,21 +187,31 @@ export class GaussianSplatLoaderSystem extends createSystem({
 
     if (!splatUrl) {
       throw new Error(
-        `[GaussianSplatLoader] Entity ${entity.index} has an empty splatUrl.`,
+        "[GaussianSplatLoader] Entity " + entity.index + " has an empty splatUrl.",
       );
     }
 
     const parent = entity.object3D;
     if (!parent) {
       throw new Error(
-        `[GaussianSplatLoader] Entity ${entity.index} has no object3D.`,
+        "[GaussianSplatLoader] Entity " + entity.index + " has no object3D.",
       );
     }
 
-    if (this.instances.has(entity.index)) {
-      await this.unload(entity, { animate: false });
+    // If we already show this URL, nothing to do
+    if (this.entityCurrentUrl.get(entity.index) === splatUrl) return;
+
+    // Detach current splat into cache (do not dispose) so we can reuse it later
+    this.detachToCache(entity);
+
+    // Instant switch: use preloaded splat from cache
+    const cached = this.cache.get(splatUrl);
+    if (cached) {
+      this.attachFromCache(entity, splatUrl, cached);
+      return;
     }
 
+    // Not in cache: load async, then cache and attach
     const enableLod = entity.getValue(
       GaussianSplatLoader,
       "enableLod",
@@ -179,7 +234,7 @@ export class GaussianSplatLoaderSystem extends createSystem({
         () =>
           reject(
             new Error(
-              `[GaussianSplatLoader] Timed out loading "${splatUrl}" after ${LOAD_TIMEOUT_MS / 1000}s`,
+              "[GaussianSplatLoader] Timed out loading " + splatUrl + " after " + (LOAD_TIMEOUT_MS / 1000) + "s",
             ),
           ),
         LOAD_TIMEOUT_MS,
@@ -187,12 +242,20 @@ export class GaussianSplatLoaderSystem extends createSystem({
     });
     await Promise.race([splat.initialized, timeout]);
 
+    // Preload may have finished in the meantime — use cache to avoid duplicate
+    if (this.cache.has(splatUrl)) {
+      splat.dispose();
+      const cached = this.cache.get(splatUrl)!;
+      this.attachFromCache(entity, splatUrl, cached);
+      return;
+    }
+
     let collider: THREE.Group | null = null;
     if (meshUrl) {
       const gltf = await this.gltfLoader.loadAsync(meshUrl);
       collider = gltf.scene;
       collider.traverse((child) => {
-        if ((child as THREE.Mesh).isMesh) child.visible = false;
+        if ((child as THREE.Mesh).isMesh) (child as THREE.Mesh).visible = false;
       });
     }
 
@@ -200,21 +263,43 @@ export class GaussianSplatLoaderSystem extends createSystem({
     animator.apply();
     if (!animate) animator.setProgress(1);
 
-    // Render splats behind UI panels (which use AlwaysDepth + high renderOrder)
     splat.renderOrder = -10;
     parent.add(splat);
     if (collider) parent.add(collider);
 
-    this.instances.set(entity.index, { splat, collider, animator });
-    console.log(
-      `[GaussianSplatLoader] Loaded splat for entity ${entity.index}` +
-        `${collider ? " (with collider)" : ""}`,
-    );
+    const instance: SplatInstance = { splat, collider, animator };
+    this.instances.set(entity.index, instance);
+    this.entityCurrentUrl.set(entity.index, splatUrl);
 
     if (animate) {
       this.animating.add(entity.index);
       await animator.animateIn();
     }
+  }
+
+  /** Remove current splat from scene and put it in cache (do not dispose). */
+  private detachToCache(entity: Entity): void {
+    const instance = this.instances.get(entity.index);
+    if (!instance) return;
+    const url = this.entityCurrentUrl.get(entity.index);
+    this.animating.delete(entity.index);
+    instance.splat.parent?.remove(instance.splat);
+    if (instance.collider) instance.collider.parent?.remove(instance.collider);
+    this.instances.delete(entity.index);
+    this.entityCurrentUrl.delete(entity.index);
+    if (url) this.cache.set(url, instance);
+  }
+
+  /** Attach a cached splat to the entity's parent (instant). */
+  private attachFromCache(entity: Entity, splatUrl: string, instance: SplatInstance): void {
+    this.cache.delete(splatUrl);
+    const parent = entity.object3D!;
+    instance.animator?.setProgress(1);
+    instance.splat.renderOrder = -10;
+    parent.add(instance.splat);
+    if (instance.collider) parent.add(instance.collider);
+    this.instances.set(entity.index, instance);
+    this.entityCurrentUrl.set(entity.index, splatUrl);
   }
 
 

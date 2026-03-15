@@ -1,4 +1,3 @@
-
 import * as THREE from "three";
 import {
   EnvironmentType,
@@ -14,11 +13,7 @@ import {
   World,
 } from "@iwsdk/core";
 import { PanelSystem } from "./uiPanel.js";
-import { GaussianSplatLoader, GaussianSplatLoaderSystem } from "./gaussianSplatLoader.js";
-import { CognitiveState, CognitiveWorldSystem } from "./cognitiveWorld.js";
-import { setCognitiveState, setCognitiveStateFromDominant } from "./cognitiveStateStore.js";
-import { spawnHologramSphere } from "./interactableExample.js";
-import { SPLAT_URL } from "./config.js";
+import { initSplatSwitcher, toggleSplatByState } from "./splatSwitcher.js";
 
 
 // ------------------------------------------------------------
@@ -41,47 +36,19 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     sceneUnderstanding: false,
   },
 })
-  .then((world) => {
+  .then(async (world) => {
     world.camera.position.set(0, 1.5, 0);
     world.scene.background = new THREE.Color(0x000000);
     world.scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 
-    world
-      .registerSystem(PanelSystem)
-      .registerSystem(GaussianSplatLoaderSystem)
-      .registerSystem(CognitiveWorldSystem);
+    world.registerSystem(PanelSystem);
 
+    // Load all 5 splats (neutral + 4 states). All resident in memory;
+    // switching is instant via .visible toggle.
+    await initSplatSwitcher(world.scene, world.renderer, world.camera);
 
     // ------------------------------------------------------------
-    // Gaussian Splat (Marble world — default: Venice.spz; set VITE_SPLAT_URL in .env to override)
-    // ------------------------------------------------------------
-    const splatEntity = world.createTransformEntity();
-    splatEntity.addComponent(GaussianSplatLoader, {
-      splatUrl: SPLAT_URL,
-      meshUrl: "",
-      autoLoad: true,
-      animate: true,
-      enableLod: true,
-    });
-
-    const splatSystem = world.getSystem(GaussianSplatLoaderSystem)!;
-
-    // Cognitive state entity: voice → Brain → onStateUpdate(setCognitiveState) → CognitiveWorldSystem drives bridge/fog/island/light
-    const stateEntity = world.createTransformEntity();
-    stateEntity.addComponent(CognitiveState);
-
-    // Play splat animation when entering XR
-    world.visibilityState.subscribe((state) => {
-      if (state !== VisibilityState.NonImmersive) {
-        splatSystem.replayAnimation(splatEntity).catch((err) => {
-          console.error("[World] Failed to replay splat animation:", err);
-        });
-      }
-    });
-
-    
-    // ------------------------------------------------------------
-    // Invisible floor for locomotion (must be a Mesh for IWSDK raycasting)
+    // Invisible floor for locomotion
     // ------------------------------------------------------------
     const floorGeometry = new PlaneGeometry(100, 100);
     floorGeometry.rotateX(-Math.PI / 2);
@@ -95,13 +62,6 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     grid.material.transparent = true;
     grid.material.opacity = 0.4;
     world.scene.add(grid);
-
-
-    // ------------------------------------------------------------
-    // Hologram Sphere (distance-grabbable, translate in place)
-    // ------------------------------------------------------------
-    spawnHologramSphere(world);
-
 
     // ------------------------------------------------------------
     // Panel UI (centered on screen in desktop, positioned in 3D for XR)
@@ -124,24 +84,16 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       });
     panelEntity.object3D!.position.set(0, 1.29, -1.9);
 
-    // Manual state buttons: switch cognitive state (bridge/fog/island/light react)
+    // Desktop HTML buttons also toggle splats
     const stateButtons = document.getElementById("state-buttons");
     if (stateButtons) {
       stateButtons.querySelectorAll<HTMLButtonElement>("button[data-state]").forEach((btn) => {
         const state = btn.getAttribute("data-state") as "reflection" | "defensiveness" | "curiosity" | "stress";
-        if (state) btn.addEventListener("click", () => setCognitiveStateFromDominant(state));
+        if (state) btn.addEventListener("click", () => toggleSplatByState(state));
       });
     }
-
-    // To start the voice → Brain → environment loop, call:
-    //   import { runConversation } from "./conversationManager.js";
-    //   runConversation("Think of a recent disagreement. What happened?", { onStateUpdate: setCognitiveState });
-    // Each Brain response updates the store; CognitiveWorldSystem animates bridge/fog/island/light.
 
   })
   .catch((err) => {
     console.error("[World] Failed to create the IWSDK world:", err);
-    const container = document.getElementById("scene-container");
   });
-
-  

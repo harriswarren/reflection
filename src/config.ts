@@ -15,11 +15,13 @@ export const TTS_API_KEY = env.VITE_TTS_API_KEY != null ? env.VITE_TTS_API_KEY :
 // Optional: World Labs (Marble) API key for programmatic world generation. Prefer calling from Brain backend so the key is not in the frontend.
 export const WORLDLABS_API_KEY = env.VITE_WORLDLABS_API_KEY != null ? env.VITE_WORLDLABS_API_KEY : "";
 
-// Splat URL for the main world (Marble Gaussian splat). Use a path under public/ or a full URL from Marble API.
-// Default matches default cognitive state (reflection); state-driven switching uses SPLAT_URL_BY_STATE.
-export const SPLAT_URL = env.VITE_SPLAT_URL != null && env.VITE_SPLAT_URL !== "" ? env.VITE_SPLAT_URL : "/splats/Venice-Reflection.spz";
+// Splat URL for the main world. Default = neutral (Venice.spz); controller/UI can switch to state-specific splats.
+export const SPLAT_URL = env.VITE_SPLAT_URL != null && env.VITE_SPLAT_URL !== "" ? env.VITE_SPLAT_URL : "/splats/Venice.spz";
 
-/** Splat URL per cognitive state — environment switches to this when dominant state changes. */
+/** Neutral environment (no cognitive state). */
+export const SPLAT_URL_NEUTRAL = "/splats/Venice.spz";
+
+/** Splat URL per cognitive state — used when controller or voice sets a non-neutral state. */
 export const SPLAT_URL_BY_STATE: Record<string, string> = {
   reflection: "/splats/Venice-Reflection.spz",
   defensiveness: "/splats/Venice-Defensiveness.spz",

@@ -52,6 +52,32 @@
     text-align: center;
     cursor: pointer;
   }
+
+  .state-buttons {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.8;
+    margin-top: 2;
+  }
+
+  .state-btn {
+    width: 100%;
+    padding: 1.2;
+    font-size: 2;
+    border-radius: 1.2;
+    border-width: 0.15;
+    border-color: #7b2ff2;
+    background-color: #1e1b4b;
+    color: #c4b5fd;
+    cursor: pointer;
+    text-align: center;
+  }
+
+  .state-btn.active {
+    background-color: #7b2ff2;
+    color: #0d0221;
+  }
 </style>
 <div class="panel-container">
   <img src="/SensAI-logo.png" alt="SensAI" class="logo" />
@@ -59,4 +85,10 @@
   <div class="divider"></div>
   <span class="event-line">sensaihack.com</span>
   <button id="xr-button">Enter XR</button>
+  <div class="state-buttons">
+    <button id="state-reflection" class="state-btn">Reflection</button>
+    <button id="state-defensiveness" class="state-btn">Defensiveness</button>
+    <button id="state-curiosity" class="state-btn">Curiosity</button>
+    <button id="state-stress" class="state-btn">Stress</button>
+  </div>
 </div>
