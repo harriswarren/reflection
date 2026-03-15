@@ -20,68 +20,54 @@ import { speak } from "./voiceTts.js";
 import { switchSplatTo, type SplatStateName } from "./splatSwitcher.js";
 
 const CONFIDENCE_THRESHOLD = 0.55;
-const MAX_TURNS = 5;
 const WAKE_PHRASE = "hello world model";
 
 /**
- * Opening questions, each targeting a specific emotion.
+ * Questions asked in fixed order: Defensiveness → Curiosity → Stress → Reflection.
+ * Scene starts in neutral (default). Each question targets a specific emotion.
  *
- * CURIOSITY examples — user responds with wonder, asking questions, exploring:
+ * Example user responses that would trigger each emotion:
+ *
+ * DEFENSIVENESS:
+ *   "That wasn't my fault at all. They should have communicated better.
+ *    I did everything I was supposed to do."
+ *   "People always blame me but they don't see the full picture.
+ *    I had good reasons for what I did."
+ *
+ * CURIOSITY:
  *   "I've been really fascinated by how the brain processes dreams.
  *    I keep wondering what it would be like to control them."
  *   "I saw something about deep ocean creatures — it's wild how little we know.
  *    I want to learn more about bioluminescence."
  *
- * REFLECTION examples — user responds thoughtfully, looking inward:
- *   "I think I've changed a lot in the last year. I used to avoid conflict
- *    but now I try to address things directly. It's been healthier."
- *   "Honestly, I realize I was wrong about how I handled that situation.
- *    I wish I had been more patient."
- *
- * STRESS examples — user sounds overwhelmed, pressured, anxious:
+ * STRESS:
  *   "I have so many deadlines this week and I can't keep up.
  *    I feel like I'm drowning in tasks and nothing gets finished."
  *   "My boss keeps adding more work and I can barely breathe.
  *    I haven't slept well in days."
  *
- * DEFENSIVENESS examples — user pushes back, justifies, deflects:
- *   "That wasn't my fault at all. They should have communicated better.
- *    I did everything I was supposed to do."
- *   "People always blame me but they don't see the full picture.
- *    I had good reasons for what I did."
+ * REFLECTION:
+ *   "I think I've changed a lot in the last year. I used to avoid conflict
+ *    but now I try to address things directly. It's been healthier."
+ *   "Honestly, I realize I was wrong about how I handled that situation.
+ *    I wish I had been more patient."
  */
-const OPENING_QUESTIONS: Array<{ question: string; target: string }> = [
-  {
-    target: "curiosity",
-    question: "What is something you've been wondering about lately — something that makes you want to dig deeper and learn more?",
-  },
-  {
-    target: "reflection",
-    question: "Think about a belief or opinion you held a year ago that has changed. What shifted your perspective?",
-  },
-  {
-    target: "stress",
-    question: "Describe what a really overwhelming day looks like for you. What does it feel like when everything piles up?",
-  },
+const QUESTION_SEQUENCE: Array<{ question: string; target: string }> = [
   {
     target: "defensiveness",
     question: "Tell me about a time someone criticized you or questioned your choices. How did you respond to them?",
   },
   {
     target: "curiosity",
-    question: "If you could spend a week exploring any subject with no limits, what would you choose and why?",
-  },
-  {
-    target: "reflection",
-    question: "What is something you've realized about yourself recently that surprised you?",
+    question: "What is something you've been wondering about lately — something that makes you want to dig deeper and learn more?",
   },
   {
     target: "stress",
-    question: "When was the last time you felt truly overwhelmed? Walk me through what was happening.",
+    question: "Describe what a really overwhelming day looks like for you. What does it feel like when everything piles up?",
   },
   {
-    target: "defensiveness",
-    question: "Has anyone recently said something about you that felt unfair? What was it and how did it make you react?",
+    target: "reflection",
+    question: "Think about a belief or opinion you held a year ago that has changed. What shifted your perspective?",
   },
 ];
 
@@ -199,17 +185,18 @@ async function sayAndNotify(text: string, callbacks?: ConversationCallbacks): Pr
 }
 
 async function runConversationLoop(callbacks?: ConversationCallbacks): Promise<void> {
-  // Pick a random opening question
-  const opening = OPENING_QUESTIONS[Math.floor(Math.random() * OPENING_QUESTIONS.length)];
-
-  // Greeting — single utterance, then the question
+  // Greeting
   await sayAndNotify("Hello. I'm your world model. Let's explore something together.", callbacks);
-  await sayAndNotify(opening.question, callbacks);
 
-  let previousQuestion = opening.question;
-  let turn = 0;
+  // Walk through the fixed question sequence:
+  // Defensiveness → Curiosity → Stress → Reflection
+  for (let i = 0; i < QUESTION_SEQUENCE.length; i++) {
+    const { question, target } = QUESTION_SEQUENCE[i];
+    console.log("[Conversation] Turn " + (i + 1) + "/" + QUESTION_SEQUENCE.length + " — target: " + target);
 
-  while (turn < MAX_TURNS) {
+    // === MODEL ASKS QUESTION ===
+    await sayAndNotify(question, callbacks);
+
     // === USER'S TURN ===
     callbacks?.onListening?.();
     callbacks?.onTranscript?.("", false);
@@ -236,7 +223,7 @@ async function runConversationLoop(callbacks?: ConversationCallbacks): Promise<v
     } catch (e) {
       console.error("[Conversation] Brain API error:", e);
       callbacks?.onError?.(e instanceof Error ? e : new Error(String(e)));
-      await sayAndNotify("I had trouble processing that. Could you try again?", callbacks);
+      await sayAndNotify("I had trouble processing that. Let's move on.", callbacks);
       continue;
     }
 
@@ -258,19 +245,16 @@ async function runConversationLoop(callbacks?: ConversationCallbacks): Promise<v
         " below threshold " + CONFIDENCE_THRESHOLD + ", keeping current scene.");
     }
 
-    // === MODEL'S TURN — speak reflection then follow-up question ===
+    // === MODEL REFLECTS ===
     if (result.voice_reflection) {
       await sayAndNotify(result.voice_reflection, callbacks);
     }
-    if (result.next_question) {
-      await sayAndNotify(result.next_question, callbacks);
-      previousQuestion = result.next_question;
-    }
 
-    turn++;
-    callbacks?.onTurnComplete?.(turn);
+    callbacks?.onTurnComplete?.(i + 1);
   }
 
+  // Done — return to neutral scene
+  await sayAndNotify("Thank you for sharing. Your world is returning to its resting state.", callbacks);
   switchSplatTo("neutral");
   callbacks?.onConversationEnd?.();
 }

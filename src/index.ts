@@ -43,6 +43,9 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     world.scene.background = new THREE.Color(0x000000);
     world.scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 
+    // Camera must be in the scene graph for HUD sprites (children of camera) to render
+    world.scene.add(world.camera);
+
     world.registerSystem(PanelSystem);
 
     // Load all 5 splats (neutral + 4 states). All resident in memory;
