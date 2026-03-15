@@ -99,29 +99,30 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     const hud = new VoiceStatusHud(world.camera);
 
     // Voice conversation: wake word "Hello World Model" → listen → Brain → scene change.
-    // Uses Pico 4 mic via Web Speech API. Runs continuously in background.
     startVoiceConversation({
       onReady: () => {
-        // Diagnostics passed — mic works, now waiting for wake word
         hud.setState("wake_word");
-        hud.setTranscript("");
+        hud.setModelText("");
+        hud.setUserText("");
       },
       onWakeWordDetected: () => {
-        hud.setState("listening");
-        hud.setTranscript("");
+        hud.setState("speaking");
+        hud.setUserText("");
         hud.setEmotion("");
+      },
+      onModelSpeaking: (text) => {
+        hud.setState("speaking");
+        hud.setModelText(text);
       },
       onListening: () => {
         hud.setState("listening");
+        hud.setUserText("");
       },
       onProcessing: () => {
         hud.setState("processing");
       },
-      onSpeaking: () => {
-        hud.setState("speaking");
-      },
       onTranscript: (text) => {
-        hud.setTranscript(text);
+        hud.setUserText(text);
       },
       onSceneChange: (state, score) => {
         const label = state.charAt(0).toUpperCase() + state.slice(1);
@@ -129,12 +130,12 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       },
       onConversationEnd: () => {
         hud.setState("wake_word");
-        hud.setTranscript("");
+        hud.setModelText("");
+        hud.setUserText("");
         hud.setEmotion("");
       },
       onDiagnostic: (msg) => {
-        // Show diagnostic/error details on the transcript line of the HUD
-        hud.setTranscript(msg);
+        hud.setUserText(msg);
       },
       onError: (err) => {
         hud.setState("error");

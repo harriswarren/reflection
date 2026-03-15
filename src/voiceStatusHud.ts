@@ -1,45 +1,45 @@
 /**
  * VoiceStatusHud — a canvas-based sprite pinned to the bottom-left of
  * the user's view (works in both VR and desktop). Shows:
- *   - Current state icon + label (mic, speaking, processing, idle)
- *   - Last transcript heard
- *   - Current emotion detected
+ *
+ *   Line 1:  [dot] Status label  (e.g. "Listening...", "Speaking...")
+ *   Line 2:  Model: <what the model is saying/asking>   (blue text)
+ *   Line 3:  You: <what the mic is hearing>              (green text)
+ *   Line 4:  Scene: <detected emotion>                   (yellow text)
  *
  * The sprite is a child of the camera so it follows head movement.
- * We draw to a canvas and update the texture when state changes.
  */
 
 import * as THREE from "three";
 
 export type HudState =
-  | "startup"     // checking mic / secure context
-  | "wake_word"   // mic is live, waiting for "Hello World Model"
-  | "listening"   // mic active, user responding to a question
-  | "processing"  // sent to Brain, waiting for result
-  | "speaking"    // TTS playing
-  | "error";      // something went wrong (see transcript line for details)
+  | "startup"
+  | "wake_word"
+  | "listening"
+  | "processing"
+  | "speaking"
+  | "error";
 
 const STATE_LABELS: Record<HudState, string> = {
   startup: "Starting mic...",
   wake_word: "Say \"Hello World Model\"",
-  listening: "Listening...",
+  listening: "Your turn — speak now",
   processing: "Thinking...",
-  speaking: "Speaking...",
+  speaking: "Model speaking...",
   error: "Mic Error",
 };
 
-// Color dot per state — distinct colors so each phase is obvious at a glance
 const STATE_COLORS: Record<HudState, string> = {
   startup: "#aaaaaa",
-  wake_word: "#ffdd44",   // yellow pulsing — "I'm ready, talk to me"
-  listening: "#44ff44",   // green — mic is live
-  processing: "#ffaa00",  // orange — thinking
-  speaking: "#4488ff",    // blue — TTS playing
-  error: "#ff4444",       // red — problem
+  wake_word: "#ffdd44",
+  listening: "#44ff44",
+  processing: "#ffaa00",
+  speaking: "#4488ff",
+  error: "#ff4444",
 };
 
-const CANVAS_W = 512;
-const CANVAS_H = 200;
+const CANVAS_W = 640;
+const CANVAS_H = 300;
 
 export class VoiceStatusHud {
   private sprite: THREE.Sprite;
@@ -48,7 +48,8 @@ export class VoiceStatusHud {
   private texture: THREE.CanvasTexture;
 
   private currentState: HudState = "startup";
-  private transcript = "";
+  private modelText = "";
+  private userText = "";
   private emotion = "";
   private dirty = true;
 
@@ -69,10 +70,9 @@ export class VoiceStatusHud {
     });
 
     this.sprite = new THREE.Sprite(material);
-    // Scale: wide rectangle in bottom-left of view
-    this.sprite.scale.set(0.5, 0.2, 1);
-    // Position relative to camera: bottom-left, slightly in front
-    this.sprite.position.set(-0.32, -0.22, -0.7);
+    // Wider and taller to fit more text
+    this.sprite.scale.set(0.6, 0.28, 1);
+    this.sprite.position.set(-0.28, -0.20, -0.7);
     this.sprite.renderOrder = 20_000;
 
     camera.add(this.sprite);
@@ -84,7 +84,6 @@ export class VoiceStatusHud {
       this.currentState = state;
       this.dirty = true;
       this.redraw();
-      // Update HTML overlay for desktop
       const dot = document.getElementById("status-dot");
       const label = document.getElementById("status-label");
       if (dot) dot.style.background = STATE_COLORS[state];
@@ -92,14 +91,27 @@ export class VoiceStatusHud {
     }
   }
 
-  setTranscript(text: string): void {
-    const truncated = text.length > 60 ? text.substring(0, 57) + "..." : text;
-    if (truncated !== this.transcript) {
-      this.transcript = truncated;
+  /** Show the model's spoken text (question or reflection). */
+  setModelText(text: string): void {
+    const truncated = text.length > 90 ? text.substring(0, 87) + "..." : text;
+    if (truncated !== this.modelText) {
+      this.modelText = truncated;
+      this.dirty = true;
+      this.redraw();
+      const el = document.getElementById("status-model-text");
+      if (el) el.textContent = truncated ? "Model: " + truncated : "";
+    }
+  }
+
+  /** Show what the mic is hearing (user's speech). */
+  setUserText(text: string): void {
+    const truncated = text.length > 90 ? text.substring(0, 87) + "..." : text;
+    if (truncated !== this.userText) {
+      this.userText = truncated;
       this.dirty = true;
       this.redraw();
       const el = document.getElementById("status-transcript");
-      if (el) el.textContent = truncated;
+      if (el) el.textContent = truncated ? "You: " + truncated : "";
     }
   }
 
@@ -121,50 +133,76 @@ export class VoiceStatusHud {
     const w = CANVAS_W;
     const h = CANVAS_H;
 
-    // Background: semi-transparent dark rounded rect
     ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+    ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
     roundRect(ctx, 4, 4, w - 8, h - 8, 16);
     ctx.fill();
 
-    // Status dot
+    // Row 1: Status dot + label
     const dotColor = STATE_COLORS[this.currentState];
     ctx.beginPath();
-    ctx.arc(32, 40, 12, 0, Math.PI * 2);
+    ctx.arc(28, 36, 10, 0, Math.PI * 2);
     ctx.fillStyle = dotColor;
     ctx.fill();
 
-    // Ring around dot for active-listening states
     if (this.currentState === "listening" || this.currentState === "wake_word") {
       ctx.beginPath();
-      ctx.arc(32, 40, 16, 0, Math.PI * 2);
+      ctx.arc(28, 36, 14, 0, Math.PI * 2);
       ctx.strokeStyle = dotColor;
       ctx.lineWidth = 2;
       ctx.stroke();
     }
 
-    // Status label
     ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 28px sans-serif";
+    ctx.font = "bold 24px sans-serif";
     ctx.textBaseline = "middle";
-    ctx.fillText(STATE_LABELS[this.currentState], 54, 40);
+    ctx.fillText(STATE_LABELS[this.currentState], 50, 36);
 
-    // Transcript line
-    if (this.transcript) {
-      ctx.fillStyle = "#cccccc";
-      ctx.font = "22px sans-serif";
-      ctx.fillText(this.transcript, 20, 95);
+    // Row 2: Model text (blue)
+    if (this.modelText) {
+      ctx.fillStyle = "#88bbff";
+      ctx.font = "20px sans-serif";
+      wrapText(ctx, "Model: " + this.modelText, 18, 80, w - 36, 22);
     }
 
-    // Emotion line
+    // Row 3: User text (green)
+    if (this.userText) {
+      ctx.fillStyle = "#88ff88";
+      ctx.font = "20px sans-serif";
+      const userY = this.modelText ? 150 : 80;
+      wrapText(ctx, "You: " + this.userText, 18, userY, w - 36, 22);
+    }
+
+    // Row 4: Emotion (yellow)
     if (this.emotion) {
       ctx.fillStyle = "#fbbf24";
-      ctx.font = "bold 24px sans-serif";
-      ctx.fillText("Scene: " + this.emotion, 20, 145);
+      ctx.font = "bold 22px sans-serif";
+      ctx.fillText("Scene: " + this.emotion, 18, h - 24);
     }
 
     this.texture.needsUpdate = true;
   }
+}
+
+/** Draw text with simple word wrapping. */
+function wrapText(
+  ctx: CanvasRenderingContext2D,
+  text: string, x: number, y: number, maxWidth: number, lineHeight: number,
+): void {
+  const words = text.split(" ");
+  let line = "";
+  let drawY = y;
+  for (const word of words) {
+    const testLine = line ? line + " " + word : word;
+    if (ctx.measureText(testLine).width > maxWidth && line) {
+      ctx.fillText(line, x, drawY);
+      line = word;
+      drawY += lineHeight;
+    } else {
+      line = testLine;
+    }
+  }
+  if (line) ctx.fillText(line, x, drawY);
 }
 
 function roundRect(
