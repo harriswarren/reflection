@@ -12,27 +12,30 @@
 import * as THREE from "three";
 
 export type HudState =
-  | "idle"        // waiting for wake word
-  | "listening"   // mic active, user speaking
+  | "startup"     // checking mic / secure context
+  | "wake_word"   // mic is live, waiting for "Hello World Model"
+  | "listening"   // mic active, user responding to a question
   | "processing"  // sent to Brain, waiting for result
   | "speaking"    // TTS playing
-  | "error";
+  | "error";      // something went wrong (see transcript line for details)
 
 const STATE_LABELS: Record<HudState, string> = {
-  idle: "Say \"Hello World Model\"",
+  startup: "Starting mic...",
+  wake_word: "Say \"Hello World Model\"",
   listening: "Listening...",
   processing: "Thinking...",
   speaking: "Speaking...",
-  error: "Error",
+  error: "Mic Error",
 };
 
-// Color dot per state
+// Color dot per state — distinct colors so each phase is obvious at a glance
 const STATE_COLORS: Record<HudState, string> = {
-  idle: "#888888",
-  listening: "#44ff44",
-  processing: "#ffaa00",
-  speaking: "#4488ff",
-  error: "#ff4444",
+  startup: "#aaaaaa",
+  wake_word: "#ffdd44",   // yellow pulsing — "I'm ready, talk to me"
+  listening: "#44ff44",   // green — mic is live
+  processing: "#ffaa00",  // orange — thinking
+  speaking: "#4488ff",    // blue — TTS playing
+  error: "#ff4444",       // red — problem
 };
 
 const CANVAS_W = 512;
@@ -44,7 +47,7 @@ export class VoiceStatusHud {
   private ctx: CanvasRenderingContext2D;
   private texture: THREE.CanvasTexture;
 
-  private currentState: HudState = "idle";
+  private currentState: HudState = "startup";
   private transcript = "";
   private emotion = "";
   private dirty = true;
@@ -131,8 +134,8 @@ export class VoiceStatusHud {
     ctx.fillStyle = dotColor;
     ctx.fill();
 
-    // Pulsing ring for listening state (static ring here; animation would need frame loop)
-    if (this.currentState === "listening") {
+    // Ring around dot for active-listening states
+    if (this.currentState === "listening" || this.currentState === "wake_word") {
       ctx.beginPath();
       ctx.arc(32, 40, 16, 0, Math.PI * 2);
       ctx.strokeStyle = dotColor;

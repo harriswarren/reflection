@@ -101,6 +101,11 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     // Voice conversation: wake word "Hello World Model" → listen → Brain → scene change.
     // Uses Pico 4 mic via Web Speech API. Runs continuously in background.
     startVoiceConversation({
+      onReady: () => {
+        // Diagnostics passed — mic works, now waiting for wake word
+        hud.setState("wake_word");
+        hud.setTranscript("");
+      },
       onWakeWordDetected: () => {
         hud.setState("listening");
         hud.setTranscript("");
@@ -123,9 +128,13 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         hud.setEmotion(label + " (" + (score * 100).toFixed(0) + "%)");
       },
       onConversationEnd: () => {
-        hud.setState("idle");
+        hud.setState("wake_word");
         hud.setTranscript("");
         hud.setEmotion("");
+      },
+      onDiagnostic: (msg) => {
+        // Show diagnostic/error details on the transcript line of the HUD
+        hud.setTranscript(msg);
       },
       onError: (err) => {
         hud.setState("error");

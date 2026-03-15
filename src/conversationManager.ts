@@ -14,7 +14,7 @@
  */
 
 import { infer, type BrainInferResponse } from "./brainClient.js";
-import { startListening, type SttCallback } from "./voiceStt.js";
+import { startListening, checkSttSupport, requestMicPermission } from "./voiceStt.js";
 import { speak } from "./voiceTts.js";
 import { switchSplatTo, type SplatStateName } from "./splatSwitcher.js";
 
@@ -37,6 +37,8 @@ const OPENING_QUESTIONS = [
 ];
 
 export interface ConversationCallbacks {
+  /** Fired when diagnostics pass and the system begins listening for wake word. */
+  onReady?: () => void;
   onWakeWordDetected?: () => void;
   onListening?: () => void;
   onProcessing?: () => void;
@@ -47,44 +49,94 @@ export interface ConversationCallbacks {
   onTurnComplete?: (turn: number) => void;
   onConversationEnd?: () => void;
   onError?: (error: Error) => void;
+  /** Fired with a diagnostic/error string for display on the HUD. */
+  onDiagnostic?: (message: string) => void;
 }
 
 /**
  * Start listening for the wake word. Once detected, runs the
  * conversation loop (question → listen → infer → scene change → repeat).
  * Returns a cleanup function that stops everything.
+ *
+ * Runs startup diagnostics first:
+ *  1. Checks secure context (HTTPS)
+ *  2. Checks SpeechRecognition API availability
+ *  3. Requests microphone permission
+ * If any fail, fires onError + onDiagnostic so the HUD shows what's wrong.
  */
 export function startVoiceConversation(callbacks?: ConversationCallbacks): () => void {
   let stopped = false;
   let stopCurrentListener: (() => void) | null = null;
 
-  console.log("[Conversation] Listening for wake word: \"Hello World Model\"");
-
-  // Phase 1: listen for wake word
-  stopCurrentListener = startListening((result) => {
-    if (stopped) return;
-    const text = result.transcript.toLowerCase();
-    callbacks?.onTranscript?.(result.transcript, result.isFinal);
-
-    if (text.includes(WAKE_PHRASE)) {
-      console.log("[Conversation] Wake word detected!");
-      callbacks?.onWakeWordDetected?.();
-      stopCurrentListener?.();
-      stopCurrentListener = null;
-      runConversationLoop(callbacks).catch((err) => {
-        console.error("[Conversation] Loop error:", err);
-        callbacks?.onError?.(err instanceof Error ? err : new Error(String(err)));
-      }).finally(() => {
-        if (!stopped) {
-          // Restart wake word listening after conversation ends
-          console.log("[Conversation] Returning to wake word listening.");
-          callbacks?.onConversationEnd?.();
-          const cleanup = startVoiceConversation(callbacks);
-          stopCurrentListener = cleanup as unknown as () => void;
-        }
-      });
+  // Run async diagnostics then begin listening
+  (async () => {
+    // --- Step 1: Check browser support ---
+    const support = checkSttSupport();
+    if (!support.supported) {
+      console.error("[Conversation] STT not supported:", support.reason);
+      callbacks?.onDiagnostic?.(support.reason);
+      callbacks?.onError?.(new Error(support.reason));
+      return;
     }
+    console.log("[Conversation] STT support check passed");
+
+    // --- Step 2: Request mic permission ---
+    callbacks?.onDiagnostic?.("Requesting mic permission...");
+    const mic = await requestMicPermission();
+    if (!mic.granted) {
+      console.error("[Conversation] Mic denied:", mic.reason);
+      callbacks?.onDiagnostic?.(mic.reason);
+      callbacks?.onError?.(new Error(mic.reason));
+      return;
+    }
+    console.log("[Conversation] Mic permission granted");
+
+    if (stopped) return;
+
+    // --- Step 3: Begin wake word listening ---
+    callbacks?.onReady?.();
+    callbacks?.onDiagnostic?.("");
+    console.log("[Conversation] Listening for wake word: \"Hello World Model\"");
+    beginWakeWordListening();
+  })().catch((err) => {
+    console.error("[Conversation] Startup error:", err);
+    callbacks?.onError?.(err instanceof Error ? err : new Error(String(err)));
+    callbacks?.onDiagnostic?.("Startup error: " + String(err));
   });
+
+  function beginWakeWordListening(): void {
+    if (stopped) return;
+    stopCurrentListener = startListening(
+      (result) => {
+        if (stopped) return;
+        const text = result.transcript.toLowerCase();
+        callbacks?.onTranscript?.(result.transcript, result.isFinal);
+
+        if (text.includes(WAKE_PHRASE)) {
+          console.log("[Conversation] Wake word detected!");
+          callbacks?.onWakeWordDetected?.();
+          stopCurrentListener?.();
+          stopCurrentListener = null;
+          runConversationLoop(callbacks).catch((err) => {
+            console.error("[Conversation] Loop error:", err);
+            callbacks?.onError?.(err instanceof Error ? err : new Error(String(err)));
+          }).finally(() => {
+            if (!stopped) {
+              console.log("[Conversation] Returning to wake word listening.");
+              callbacks?.onConversationEnd?.();
+              beginWakeWordListening();
+            }
+          });
+        }
+      },
+      // STT error callback — surface to HUD
+      (sttError) => {
+        console.error("[Conversation] STT error:", sttError);
+        callbacks?.onDiagnostic?.("STT: " + sttError);
+        callbacks?.onError?.(new Error("STT: " + sttError));
+      },
+    );
+  }
 
   return () => {
     stopped = true;
@@ -182,26 +234,33 @@ function listenForResponse(callbacks?: ConversationCallbacks): Promise<string> {
     let silenceTimer: ReturnType<typeof setTimeout> | null = null;
     const SILENCE_TIMEOUT_MS = 10_000;
 
-    const stop = startListening((result) => {
-      // Reset silence timer on any speech
-      if (silenceTimer) clearTimeout(silenceTimer);
+    const stop = startListening(
+      (result) => {
+        // Reset silence timer on any speech
+        if (silenceTimer) clearTimeout(silenceTimer);
 
-      // Report what the mic hears in real time
-      callbacks?.onTranscript?.(result.transcript, result.isFinal);
+        // Report what the mic hears in real time
+        callbacks?.onTranscript?.(result.transcript, result.isFinal);
 
-      if (result.isFinal && result.transcript.trim()) {
-        finalTranscript = result.transcript.trim();
-        stop();
-        resolve(finalTranscript);
-        return;
-      }
+        if (result.isFinal && result.transcript.trim()) {
+          finalTranscript = result.transcript.trim();
+          stop();
+          resolve(finalTranscript);
+          return;
+        }
 
-      // If we're getting interim results, restart the silence timer
-      silenceTimer = setTimeout(() => {
-        stop();
-        resolve(finalTranscript);
-      }, SILENCE_TIMEOUT_MS);
-    });
+        // If we're getting interim results, restart the silence timer
+        silenceTimer = setTimeout(() => {
+          stop();
+          resolve(finalTranscript);
+        }, SILENCE_TIMEOUT_MS);
+      },
+      // STT error during conversation turn
+      (sttError) => {
+        console.error("[Conversation] STT error during turn:", sttError);
+        callbacks?.onDiagnostic?.("STT: " + sttError);
+      },
+    );
 
     // Overall timeout: 30s max per turn
     setTimeout(() => {
