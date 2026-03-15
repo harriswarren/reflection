@@ -55,7 +55,20 @@ export default defineConfig({
     },
     dedupe: ["three"],
   },
-  server: { host: "0.0.0.0", port: 8081, open: true },
+  server: {
+    host: "0.0.0.0",
+    port: 8081,
+    open: true,
+    proxy: {
+      // Proxy /brain/* to the Python Brain API so the headset can reach it
+      // over the same HTTPS origin (avoids mixed-content blocking).
+      "/brain": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+        rewrite: (p: string) => p.replace(/^\/brain/, ""),
+      },
+    },
+  },
   build: {
     outDir: "dist",
     sourcemap: process.env.NODE_ENV !== "production",

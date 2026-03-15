@@ -6,8 +6,10 @@
 const env = typeof import.meta !== "undefined" && import.meta.env ? import.meta.env : ({} as { VITE_BRAIN_API_URL?: string; VITE_TTS_API_KEY?: string; VITE_WORLDLABS_API_KEY?: string; VITE_SPLAT_URL?: string });
 
 // Base URL of the Brain (Python FastAPI) service. No trailing slash.
+// Default uses the Vite proxy at /brain so the headset can reach the Brain API
+// over the same HTTPS origin (avoids mixed-content blocking in WebXR).
 export const BRAIN_API_URL =
-  env.VITE_BRAIN_API_URL != null && env.VITE_BRAIN_API_URL !== "" ? env.VITE_BRAIN_API_URL : "http://localhost:8000";
+  env.VITE_BRAIN_API_URL != null && env.VITE_BRAIN_API_URL !== "" ? env.VITE_BRAIN_API_URL : "/brain";
 
 // Optional: TTS provider API key (Sesame/DeepInfra or ElevenLabs). Prefer env for production.
 export const TTS_API_KEY = env.VITE_TTS_API_KEY != null ? env.VITE_TTS_API_KEY : "";
