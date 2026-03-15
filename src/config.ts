@@ -16,4 +16,13 @@ export const TTS_API_KEY = env.VITE_TTS_API_KEY != null ? env.VITE_TTS_API_KEY :
 export const WORLDLABS_API_KEY = env.VITE_WORLDLABS_API_KEY != null ? env.VITE_WORLDLABS_API_KEY : "";
 
 // Splat URL for the main world (Marble Gaussian splat). Use a path under public/ or a full URL from Marble API.
-export const SPLAT_URL = env.VITE_SPLAT_URL != null && env.VITE_SPLAT_URL !== "" ? env.VITE_SPLAT_URL : "/splats/Simple-Island.spz";
+// Default matches default cognitive state (reflection); state-driven switching uses SPLAT_URL_BY_STATE.
+export const SPLAT_URL = env.VITE_SPLAT_URL != null && env.VITE_SPLAT_URL !== "" ? env.VITE_SPLAT_URL : "/splats/Venice-Reflection.spz";
+
+/** Splat URL per cognitive state — environment switches to this when dominant state changes. */
+export const SPLAT_URL_BY_STATE: Record<string, string> = {
+  reflection: "/splats/Venice-Reflection.spz",
+  defensiveness: "/splats/Venice-Defensiveness.spz",
+  curiosity: "/splats/Venice-Curiosity.spz",
+  stress: "/splats/Venice-Stress.spz",
+};

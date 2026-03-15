@@ -16,7 +16,7 @@ import {
 import { PanelSystem } from "./uiPanel.js";
 import { GaussianSplatLoader, GaussianSplatLoaderSystem } from "./gaussianSplatLoader.js";
 import { CognitiveState, CognitiveWorldSystem } from "./cognitiveWorld.js";
-import { setCognitiveState } from "./cognitiveStateStore.js";
+import { setCognitiveState, setCognitiveStateFromDominant } from "./cognitiveStateStore.js";
 import { spawnHologramSphere } from "./interactableExample.js";
 import { SPLAT_URL } from "./config.js";
 
@@ -53,7 +53,7 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
 
 
     // ------------------------------------------------------------
-    // Gaussian Splat (Marble world — default: Simple-Island.spz; set VITE_SPLAT_URL in .env to override)
+    // Gaussian Splat (Marble world — default: Venice.spz; set VITE_SPLAT_URL in .env to override)
     // ------------------------------------------------------------
     const splatEntity = world.createTransformEntity();
     splatEntity.addComponent(GaussianSplatLoader, {
@@ -123,6 +123,15 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
         width: "40%",
       });
     panelEntity.object3D!.position.set(0, 1.29, -1.9);
+
+    // Manual state buttons: switch cognitive state (bridge/fog/island/light react)
+    const stateButtons = document.getElementById("state-buttons");
+    if (stateButtons) {
+      stateButtons.querySelectorAll<HTMLButtonElement>("button[data-state]").forEach((btn) => {
+        const state = btn.getAttribute("data-state") as "reflection" | "defensiveness" | "curiosity" | "stress";
+        if (state) btn.addEventListener("click", () => setCognitiveStateFromDominant(state));
+      });
+    }
 
     // To start the voice → Brain → environment loop, call:
     //   import { runConversation } from "./conversationManager.js";

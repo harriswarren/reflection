@@ -48,3 +48,14 @@ export function getCognitiveState(): CognitiveStateSnapshot {
 export function resetCognitiveState(): void {
   current = { ...defaultState };
 }
+
+/** Set state from a dominant state name (e.g. for manual buttons). Other states set to 0.1; dominant set to 0.9. */
+export function setCognitiveStateFromDominant(dominant: DominantState): void {
+  current = {
+    dominantState: dominant,
+    reflection: dominant === "reflection" ? 0.9 : 0.1,
+    defensiveness: dominant === "defensiveness" ? 0.9 : 0.1,
+    curiosity: dominant === "curiosity" ? 0.9 : 0.1,
+    stress: dominant === "stress" ? 0.9 : 0.1,
+  };
+}

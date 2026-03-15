@@ -129,9 +129,12 @@ export class GaussianSplatLoaderSystem extends createSystem({
   // ----------------------------------------------------------
   async load(
     entity: Entity,
-    options?: { animate?: boolean },
+    options?: { animate?: boolean; splatUrl?: string },
   ): Promise<void> {
-    const splatUrl = entity.getValue(GaussianSplatLoader, "splatUrl") as string;
+    // Optional override for state-driven splat switching (e.g. cognitive state → Venice-*.spz)
+    const splatUrl = (options?.splatUrl != null && options.splatUrl !== "")
+      ? options.splatUrl
+      : (entity.getValue(GaussianSplatLoader, "splatUrl") as string);
     const meshUrl = entity.getValue(GaussianSplatLoader, "meshUrl") as string;
     const animate =
       options?.animate ??

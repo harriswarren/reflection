@@ -13,6 +13,8 @@
 import * as THREE from "three";
 import { Types, createComponent, createSystem } from "@iwsdk/core";
 import { getCognitiveState } from "./cognitiveStateStore.js";
+import { GaussianSplatLoader, GaussianSplatLoaderSystem } from "./gaussianSplatLoader.js";
+import { SPLAT_URL_BY_STATE } from "./config.js";
 
 const LERP = 0.03; // Smooth transition per frame
 const FOG_MAX = 0.08;
@@ -38,9 +40,10 @@ interface CognitiveScene {
   fog: THREE.FogExp2;
 }
 
-/** System that applies cognitive state (from store) to the scene. */
+/** System that applies cognitive state (from store) to the scene and switches splat by dominant state. */
 export class CognitiveWorldSystem extends createSystem({
   state: { required: [CognitiveState] },
+  splats: { required: [GaussianSplatLoader] },
 }) {
   private scene: CognitiveScene | null = null;
   private bridgeTargetScale = 1;
@@ -48,6 +51,8 @@ export class CognitiveWorldSystem extends createSystem({
   private islandEmissiveTarget = 0;
   private fogDensityTarget = FOG_MIN;
   private lightIntensityTarget = 1;
+  /** Track dominant state so we only switch splat when it changes. */
+  private lastDominantState: DominantState | null = null;
 
   init(): void {
     const scene = this.world.scene;
@@ -110,6 +115,25 @@ export class CognitiveWorldSystem extends createSystem({
 
     const state = getCognitiveState();
     const { dominantState, reflection, defensiveness, curiosity, stress } = state;
+
+    // When dominant state changes, switch environment splat to the state-specific Venice-*.spz
+    // Skip load on first frame (lastDominantState === null) to avoid reloading the initial splat.
+    if (dominantState !== this.lastDominantState) {
+      const previous = this.lastDominantState;
+      this.lastDominantState = dominantState;
+      if (previous !== null) {
+        const splatUrl = SPLAT_URL_BY_STATE[dominantState];
+        if (splatUrl && this.queries.splats.entities.length > 0) {
+          const splatEntity = this.queries.splats.entities[0];
+          const loaderSystem = this.world.getSystem(GaussianSplatLoaderSystem);
+          if (loaderSystem) {
+            (loaderSystem as GaussianSplatLoaderSystem)
+              .load(splatEntity, { splatUrl, animate: true })
+              .catch((err) => console.error("[CognitiveWorld] Splat switch failed:", err));
+          }
+        }
+      }
+    }
 
     // Map dominant state + scores to targets (see STATE_ENVIRONMENT_MAPPING.md)
     switch (dominantState) {
