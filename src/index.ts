@@ -15,6 +15,7 @@ import {
 import { PanelSystem } from "./uiPanel.js";
 import { initSplatSwitcher, toggleSplatByState } from "./splatSwitcher.js";
 import { startVoiceConversation } from "./conversationManager.js";
+import { VoiceStatusHud } from "./voiceStatusHud.js";
 
 
 // ------------------------------------------------------------
@@ -94,15 +95,42 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
       });
     }
 
+    // Voice status HUD: pinned to bottom-left of view, shows mic/speaking/processing state
+    const hud = new VoiceStatusHud(world.camera);
+
     // Voice conversation: wake word "Hello World Model" → listen → Brain → scene change.
     // Uses Pico 4 mic via Web Speech API. Runs continuously in background.
     startVoiceConversation({
-      onWakeWordDetected: () => console.log("[World] Wake word detected, starting conversation..."),
-      onListening: () => console.log("[World] Listening for user response..."),
-      onProcessing: () => console.log("[World] Processing speech..."),
-      onSceneChange: (state, score) => console.log("[World] Scene → " + state + " (confidence: " + score.toFixed(2) + ")"),
-      onConversationEnd: () => console.log("[World] Conversation ended, back to wake word listening."),
-      onError: (err) => console.error("[World] Conversation error:", err),
+      onWakeWordDetected: () => {
+        hud.setState("listening");
+        hud.setTranscript("");
+        hud.setEmotion("");
+      },
+      onListening: () => {
+        hud.setState("listening");
+      },
+      onProcessing: () => {
+        hud.setState("processing");
+      },
+      onSpeaking: () => {
+        hud.setState("speaking");
+      },
+      onTranscript: (text) => {
+        hud.setTranscript(text);
+      },
+      onSceneChange: (state, score) => {
+        const label = state.charAt(0).toUpperCase() + state.slice(1);
+        hud.setEmotion(label + " (" + (score * 100).toFixed(0) + "%)");
+      },
+      onConversationEnd: () => {
+        hud.setState("idle");
+        hud.setTranscript("");
+        hud.setEmotion("");
+      },
+      onError: (err) => {
+        hud.setState("error");
+        console.error("[World] Conversation error:", err);
+      },
     });
 
   })

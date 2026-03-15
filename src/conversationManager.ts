@@ -41,6 +41,8 @@ export interface ConversationCallbacks {
   onListening?: () => void;
   onProcessing?: () => void;
   onSpeaking?: () => void;
+  /** Called with interim/final transcript so UI can show what the mic hears. */
+  onTranscript?: (text: string, isFinal: boolean) => void;
   onSceneChange?: (state: SplatStateName, confidence: number) => void;
   onTurnComplete?: (turn: number) => void;
   onConversationEnd?: () => void;
@@ -62,6 +64,7 @@ export function startVoiceConversation(callbacks?: ConversationCallbacks): () =>
   stopCurrentListener = startListening((result) => {
     if (stopped) return;
     const text = result.transcript.toLowerCase();
+    callbacks?.onTranscript?.(result.transcript, result.isFinal);
 
     if (text.includes(WAKE_PHRASE)) {
       console.log("[Conversation] Wake word detected!");
@@ -104,7 +107,7 @@ async function runConversationLoop(callbacks?: ConversationCallbacks): Promise<v
   while (turn < MAX_TURNS) {
     // Listen for user's response
     callbacks?.onListening?.();
-    const transcript = await listenForResponse();
+    const transcript = await listenForResponse(callbacks);
 
     if (!transcript.trim()) {
       console.log("[Conversation] Empty response, ending conversation.");
@@ -173,7 +176,7 @@ async function runConversationLoop(callbacks?: ConversationCallbacks): Promise<v
  * Listen until the user finishes speaking (final transcript from Web Speech API).
  * A 10-second silence timeout ends the turn.
  */
-function listenForResponse(): Promise<string> {
+function listenForResponse(callbacks?: ConversationCallbacks): Promise<string> {
   return new Promise((resolve) => {
     let finalTranscript = "";
     let silenceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -182,6 +185,9 @@ function listenForResponse(): Promise<string> {
     const stop = startListening((result) => {
       // Reset silence timer on any speech
       if (silenceTimer) clearTimeout(silenceTimer);
+
+      // Report what the mic hears in real time
+      callbacks?.onTranscript?.(result.transcript, result.isFinal);
 
       if (result.isFinal && result.transcript.trim()) {
         finalTranscript = result.transcript.trim();
