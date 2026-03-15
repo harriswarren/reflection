@@ -99,10 +99,14 @@ World.create(document.getElementById("scene-container") as HTMLDivElement, {
     // and repositioned each frame to follow the user's view.
     const hud = new VoiceStatusHud(world.camera, world.scene);
 
-    // Update HUD position every frame so it follows the camera
-    world.renderer.setAnimationLoop(() => {
+    // Update HUD position every frame so it follows the camera.
+    // Uses requestAnimationFrame (not renderer.setAnimationLoop) to
+    // avoid overriding IWSDK's internal render loop.
+    function hudLoop() {
       hud.update();
-    });
+      requestAnimationFrame(hudLoop);
+    }
+    requestAnimationFrame(hudLoop);
 
     // Voice conversation: wake word "Hello World Model" → listen → Brain → scene change.
     startVoiceConversation({
